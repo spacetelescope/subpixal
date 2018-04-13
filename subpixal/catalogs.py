@@ -226,7 +226,10 @@ class SourceCatalog(object):
 
     @property
     def mask(self):
-        """ Get mask indicating "bad" (`True`) and "good" (`False`) sources.
+        """ Get mask indicating "bad" (`True`) and "good" (`False`) sources
+        when ``mask_type`` is ``'image'`` or a 2D array of shape ``(N, 2)``
+        containing integer coordinates of "bad" pixels.
+
         """
         return None if self._mask is None else self._mask.copy()
 
