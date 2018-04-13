@@ -1,8 +1,4 @@
-""" ``subpixal``: A package for aligning images and correcting their ``WCS``
-using sub-pixel cross-correlation algorithm developed by Andrew Fruchter and
-Rebekah Hounsell.
-
-"""
+""" ``subpixal`` """
 
 from __future__ import (absolute_import, division, unicode_literals,
                         print_function)

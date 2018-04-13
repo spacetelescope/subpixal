@@ -1,7 +1,7 @@
 
 """
-A module that manages drizzling input images into a combined image and also
-"inverse" blotting.
+A module that manages resampling of images onto a common output frame
+and also "inverse" blotting.
 
 :Author: Mihai Cara (contact: help@stsci.edu)
 
