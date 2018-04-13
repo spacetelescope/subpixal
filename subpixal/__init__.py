@@ -16,5 +16,5 @@ __author__ = 'Mihai Cara'
 from .version import *
 
 from .catalogs import *
-from .drizzle import *
+from .resample import *
 from .utils import *
