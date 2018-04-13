@@ -11,6 +11,8 @@ from __future__ import (absolute_import, division, unicode_literals,
 
 import numpy as np
 
+from . import __version__, __version_date__
+
 
 __all__ = ['parse_file_name']
 
@@ -32,9 +34,9 @@ def parse_file_name(image_name):
         File name itself **without** extension specification.
 
     ext : tuple, int, None
-        A tuple of two elements: _extension name_ (a string) and _extension
-        version_ (an integer number), e.g., ``('SCI', 2)``. Alternatively,
-        an extention can be  specified using an integer _extension number_.
+        A tuple of two elements: *extension name* (a string) and *extension
+        version* (an integer number), e.g., ``('SCI', 2)``. Alternatively,
+        an extention can be  specified using an integer *extension number*.
         When no extension was specified, ``ext`` returns `None`.
 
     Examples
