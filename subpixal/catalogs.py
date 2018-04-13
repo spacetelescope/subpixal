@@ -487,16 +487,21 @@ class SourceCatalog(object):
         # apply mask:
         if self._mask is None:
             mask = np.ones(xi.size, dtype=np.bool)
+
         elif self._mask_type == 'coords':
-            mask = [np.any(np.all(np.equal(self._mask, p), axis=1))
-                    for p in np.array([xi, yi]).T]
+            mask = np.logical_not(
+                [np.any(np.all(np.equal(self._mask, p), axis=1))
+                 for p in np.array([xi, yi]).T]
+            )
+
         elif self._mask_type == 'image':
             ymmax, xmmax = self._mask.shape
             mm = (xi >= 0) & (xi < xmmax) & (yi >= 0) & (yi < ymmax)
             mask = np.array(
-                [np.logical_not(self._mask[i, j]) if m else True
+                [np.logical_not(self._mask[i, j]) if m else False
                  for m, i, j in zip(mm, yi, xi)]
             )
+
         else:
             raise ValueError("Unexpected value of '_mask_type'. Contact "
                              "software developer.")
