@@ -41,8 +41,7 @@ class Resample():
         self._output_sci_data = None
         self._output_wht_data = None
         self._output_ctx_data = None
-        self._output_wcs = None
-        self._input_image_names = None
+        self._input_file_names = None
 
     @abc.abstractmethod
     def execute(self):
@@ -63,11 +62,6 @@ class Resample():
     def output_ctx(self):
         """ Get output file name for context data file or `None`. """
         return self._output_ctx_data
-
-    @property
-    def output_wcs(self):
-        """ Get ``WCS`` object of the output image or `None`. """
-        return self._output_wcs
 
     @property
     def input_image_names(self):
@@ -289,7 +283,7 @@ class Drizzle(Resample):
         )
 
         if not asndict:
-            self._input_image_names = None
+            self._input_file_names = None
             self._input_wcs = None
             return
 
