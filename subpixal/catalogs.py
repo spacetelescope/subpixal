@@ -675,12 +675,13 @@ class SExImageCatalog(SExCatalog):
             self._dirty = False
         else:
             # find output catalog file name:
-            self._catname = self._get_catname(sexconfig)
+            self._catname = SExImageCatalog._get_catname(sexconfig)
             self.set_raw_catalog(self._catname)
             self._dirty_img = True
             self._dirty = True
 
-    def _get_catname(self, sexconfig):
+    @staticmethod
+    def _get_catname(sexconfig):
         catname = None
 
         with open(sexconfig, mode='r') as f:
@@ -695,6 +696,7 @@ class SExImageCatalog(SExCatalog):
 
                 # retrieve the part before inline comments
                 cfgpar = line.split('#')[0]
+                cfgpar = cfgpar.strip()
 
                 if len(cfgpar) > 1:
                     parname, parval = cfgpar.split()[:2]
@@ -712,6 +714,61 @@ class SExImageCatalog(SExCatalog):
             )
 
         return catname
+
+    @staticmethod
+    def _get_segname(sexconfig):
+        segname = None
+        check_types = None
+        check_files = None
+
+        with open(sexconfig, mode='r') as f:
+            line = f.readline()
+
+            while line and (check_types is None or check_files is None):
+                line = line.strip()
+
+                if not line or line.startswith('#'):
+                    line = f.readline()
+                    continue
+
+                # retrieve the part before inline comments
+                cfgpar = line.split('#')[0]
+                cfgpar = cfgpar.strip()
+
+                if len(cfgpar) > 1:
+                    parname, parval = cfgpar.split()[:2]
+
+                    if cfgpar.upper().startswith('CHECKIMAGE_TYPE'):
+                        check_types = list(map(str.upper, map(
+                            str.strip,
+                            cfgpar[len('CHECKIMAGE_TYPE'):].split(',')
+                        )))
+
+                    elif cfgpar.upper().startswith('CHECKIMAGE_NAME'):
+                        check_files = list(map(
+                            str.strip,
+                            cfgpar[len('CHECKIMAGE_NAME'):].split(',')
+                        ))
+
+                line = f.readline()
+
+        if check_types is None or check_files is None:
+            return None
+
+        try:
+            idx = check_types.index('SEGMENTATION')
+        except ValueError:
+            return None
+
+        return check_files[idx]
+
+    @property
+    def segmentation_file(self):
+        """ Get segmentation file name stored in the ``SExtractor``'s
+        configuration file or `None`.
+
+        """
+        return SExImageCatalog._get_segname(self._sexconfig)
 
     def execute(self):
         if self._dirty_img:
