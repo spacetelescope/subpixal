@@ -11,21 +11,27 @@ and also "inverse" blotting.
 from __future__ import (absolute_import, division, unicode_literals,
                         print_function)
 
-import copy
 import sys
+import os
 import abc
+import copy
+import collections
+import tempfile
 
 import six
+from astropy.io import fits
 
 from stsci.tools import teal, logutil, textutil, cfgpars, fileutil
 from drizzlepac import (adrizzle, ablot, createMedian, drizCR, mdzhandler,
-                        processInput, sky, staticMask, util, wcs_functions)
+                        processInput, sky, staticMask, util, wcs_functions,
+                        __version__ as _drz_version,
+                        __version_date__ as _drz_vdate)
 import stwcs
 
 from . import __version__, __version_date__
 
 
-log = logutil.create_logger(__name__)
+log = logutil.create_logger(__name__, level=logutil.logging.NOTSET)
 
 __all__ = ['Resample', 'Drizzle']
 
@@ -41,11 +47,40 @@ class Resample():
         self._output_sci_data = None
         self._output_wht_data = None
         self._output_ctx_data = None
-        self._input_file_names = None
+        self._input_file_names = collections.OrderedDict()
 
     @abc.abstractmethod
     def execute(self):
         """ Run resampling algorithm. """
+        pass
+
+    @abc.abstractmethod
+    def fast_drop_image(self, drop_file_name):
+        """ Re-calculate resampled image using all input images other than
+        the one specified by ``drop_file_name``.
+
+        Parameters
+        ----------
+        drop_file_name : str
+            File name of the image to be dropped from the list of input
+            images when re-calculating the resampled image.
+
+        """
+        pass
+
+    @abc.abstractmethod
+    def fast_add_image(self, add_file_name):
+        """ Re-calculate resampled image using all input images and adding
+        another image to the list of input images specified by
+        the ``add_file_name`` parameter.
+
+        Parameters
+        ----------
+        add_file_name : str
+            File name of the image to be added to the input
+            image list when re-calculating the resampled image.
+
+        """
         pass
 
     @property
@@ -68,15 +103,54 @@ class Resample():
         """ Get a list of input file names or `None`. """
         return self._input_file_names
 
-
 class Drizzle(Resample):
     """
     """
     taskname = 'astrodrizzle'
 
+    _STEP_STMASK = 'STEP 1: STATIC MASK'
+    _STEP_SKYSUB = 'STEP 2: SKY SUBTRACTION'
+    _STEP_DRZSEP = 'STEP 3: DRIZZLE SEPARATE IMAGES'
+    _STEP_SEPWCS = 'STEP 3a: CUSTOM WCS FOR SEPARATE OUTPUTS'
+    _STEP_MEDIAN = 'STEP 4: CREATE MEDIAN IMAGE'
+    _STEP_BLOTBK = 'STEP 5: BLOT BACK THE MEDIAN IMAGE'
+    _STEP_CRSREJ = 'STEP 6: REMOVE COSMIC RAYS WITH DERIV, DRIZ_CR'
+    _STEP_DRZFIN = 'STEP 7: DRIZZLE FINAL COMBINED IMAGE'
+    _STEP_FINWCS = 'STEP 7a: CUSTOM WCS FOR FINAL OUTPUT'
+
     def __init__(self, config=None, **kwargs):
         super().__init__(config=config, **kwargs)
+        #self._skyfile_name = None
+        #self._skyfile_fid = None # file ID
+        #self._skyfile_fh = None # file handle
         self.set_config(config=config, **kwargs)
+
+    #def __copy__(self):
+        #cls = self.__class__
+        #new_copy_obj = cls.__new__(cls)
+        #new_copy_obj.__dict__.update(self.__dict__)
+
+        ## reset temporary skyfile
+        #new_copy_obj._tmp_skyfile_name = None
+        #new_copy_obj._tmp_skyfile_fid = None
+        #new_copy_obj._tmp_skyfile_fh = None
+
+        #return new_copy_obj
+
+    #def __deepcopy__(self, memo):
+        #cls = self.__class__
+        #new_copy_obj = cls.__new__(cls)
+        #memo[id(self)] = new_copy_obj
+        #for k, v in self.__dict__.items():
+            #setattr(new_copy_obj, k, copy.deepcopy(v, memo))
+
+        ## reset temporary skyfile
+        #new_copy_obj._tmp_skyfile_name = None
+        #new_copy_obj._tmp_skyfile_fid = None
+        #new_copy_obj._tmp_skyfile_fh = None
+
+        #return new_copy_obj
+
 
     def set_config(self, config=None, **kwargs):
         # Load any user-specified config
@@ -141,7 +215,8 @@ class Drizzle(Resample):
 
         keys = cfg.keys()
         smkeys = [k for k in keys if k.islower() and k[0] != '_']
-        sectkeys = [k for k in keys if k.isupper() and k[0] != '_']
+        sectkeys = [k for k in keys if (k.isupper() or k.startswith('STEP '))
+                    and k[0] != '_']
         stepkeys = [k for k in sectkeys if k.startswith('STEP ')]
         sectkeys = [k for k in sectkeys if k not in stepkeys]
         for k in smkeys + sectkeys + stepkeys:
@@ -165,7 +240,7 @@ class Drizzle(Resample):
         procSteps = util.ProcSteps()
 
         print("AstroDrizzle Version {:s} ({:s}) started at: {:s}\n"
-              .format(__version__, __version_date__, util._ptime()[0]))
+              .format(_drz_version, _drz_vdate, util._ptime()[0]))
         util.print_pkg_versions(log=log)
 
         filename = self._config.get('runfile', output)
@@ -204,9 +279,10 @@ class Drizzle(Resample):
                 errmsg += "Exiting AstroDrizzle now..."
                 print(textutil.textbox(errmsg, width=65))
                 print(textutil.textbox(
-                    'ERROR:\nAstroDrizzle Version %s encountered a problem!  '
-                    'Processing terminated at %s.' %
-                    (__version__, util._ptime()[0])), file=sys.stderr)
+                    'ERROR:\nAstroDrizzle Version {:s} encountered a problem! '
+                    'Processing terminated at {:s}.'
+                    .format(_drz_version, util._ptime()[0])
+                    ), file=sys.stderr)
                 procSteps.reportTimes()
                 return
 
@@ -242,19 +318,21 @@ class Drizzle(Resample):
                                procSteps=procSteps)
 
             print('\nAstroDrizzle Version {} is finished processing at {}!\n'
-                  .format(__version__, util._ptime()[0]))
+                  .format(_drz_version, util._ptime()[0]))
 
         except:
             print(textutil.textbox(
-                'ERROR:\nAstroDrizzle Version {:s} encountered a problem!  '
+                'ERROR:\nAstroDrizzle Version {:s} encountered a problem! '
                 'Processing terminated at {:s}.'
-                .format(__version__, util._ptime()[0])), file=sys.stderr)
+                .format(_drz_version, util._ptime()[0])),
+                  file=sys.stderr)
             procSteps.reportTimes()
             if imgObjList is not None:
                 for image in imgObjList:
                     image.close()
-                del imgObjList
-                del outwcs
+            del imgObjList
+            del outwcs
+            raise
 
         finally:
             util.end_logging(filename)
@@ -283,7 +361,7 @@ class Drizzle(Resample):
         )
 
         if not asndict:
-            self._input_file_names = None
+            self._input_file_names = collections.OrderedDict()
             self._input_wcs = None
             return
 
@@ -300,17 +378,17 @@ class Drizzle(Resample):
             # Update self._config with values from mpars
             cfgpars.mergeConfigObj(config, mdriztab_dict)
 
-        imname = []
+        imname = collections.OrderedDict()
+        auto_group = config['group'] is None or config['group'].strip() == ''
+
         for f in files:
             image = processInput._getInputImage(f, group=config['group'])
-            if config['group'] is None or config['group'].strip() == '':
-                extvers = range(1, image._numchips + 1)
+            if auto_group:
+                extvers = list(range(1, image._numchips + 1))
             else:
                 extvers = image.group
 
-            for i in extvers:
-                fn = '{:s}[{:s},{:d}]'.format(f, image.scienceExt, i)
-                imname.append(fn)
+            imname[f] = [(image.scienceExt, i) for i in extvers]
 
             image.close()
             del image
@@ -319,16 +397,164 @@ class Drizzle(Resample):
 
     def _image_names_from_imobj(self, imobj):
         config = self._config
-        imname = []
+
+        imname = collections.OrderedDict()
+        auto_group = config['group'] is None or config['group'].strip() == ''
 
         for image in imobj:
-            if config['group'] is None or config['group'].strip() == '':
-                extvers = range(1, image._numchips + 1)
+            if auto_group:
+                extvers = list(range(1, image._numchips + 1))
             else:
                 extvers = image.group
 
-            for i in extvers:
-                fn = '{:s}[{:s},{:d}]'.format(image._filename, image.scienceExt, i)
-                imname.append(fn)
+            imname[image._filename] = [(image.scienceExt, i) for i in extvers]
 
         self._input_file_names = imname
+
+    def fast_drop_image(self, drop_file_name):
+        """ Re-calculate resampled image using all input images other than
+        the one specified by ``drop_file_name``.
+
+        Parameters
+        ----------
+        drop_file_name : str
+            File name of the image to be dropped from the list of input
+            images when re-calculating the resampled image.
+
+        """
+        self.fast_replace_image(drop_file_name=drop_file_name,
+                                add_file_name=None)
+
+
+    def fast_add_image(self, add_file_name):
+        """ Re-calculate resampled image using all input images and adding
+        another image to the list of input images specified by
+        the ``add_file_name`` parameter.
+
+        Parameters
+        ----------
+        add_file_name : str
+            File name of the image to be added to the input
+            image list when re-calculating the resampled image.
+
+        """
+        self.fast_replace_image(drop_file_name=None,
+                                add_file_name=add_file_name)
+
+    def fast_replace_image(self, drop_file_name, add_file_name):
+        """ Re-calculate resampled image using all input images and adding
+        another image to the list of input images specified by
+        the ``add_file_name`` parameter.
+
+        Parameters
+        ----------
+        add_file_name : str
+            File name of the image to be added to the input
+            image list when re-calculating the resampled image.
+
+        """
+        if add_file_name is None and drop_file_name is None:
+            # nothing to do...
+            return
+
+        sta = None if add_file_name is None else os.stat(add_file_name)
+        std = None if drop_file_name is None else os.stat(drop_file_name)
+
+        if sta == std:
+            # Both files are identical. Nothing to do...
+            return
+
+        fnames = list(self.input_image_names.keys())
+        modified = True
+
+        if drop_file_name is not None:
+            dropping = True
+            new_fnames = [f for f in fnames if os.stat(f) != std]
+            if len(new_fnames) == len(fnames):
+                # file not found in input list. Nothing to do (or drop):
+                dropping = False
+            else:
+                fnames = new_fnames
+
+        if add_file_name is not None:
+            adding = True
+            for f in fnames:
+                if os.stat(f) == sta:
+                    # file already in input list. Nothing to do...
+                    adding = False
+                    break
+            if adding:
+                fnames.append(add_file_name)
+
+        # update input image list
+        input_files = ','.join(fnames)
+        self._config['input'] = input_files
+
+        # re-calculate resampled image
+        config = copy.deepcopy(self._config)
+        try:
+            skyfile = config[self._STEP_SKYSUB]['skyfile']
+            skyfile = '' if skyfile is None else skyfile.strip()
+            if config[self._STEP_SKYSUB]['skysub'] and skyfile == '':
+                tmpf = tempfile.NamedTemporaryFile(
+                    mode='w+t', suffix='.txt', prefix='tmp_skyfile_', dir='./'
+                )
+                self._create_skyfile(tmpf.file)
+                skyfile = tmpf.name
+                # set sky-related config parameters:
+                self._config[self._STEP_SKYSUB]['skyuser'] = ''
+                self._config[self._STEP_SKYSUB]['skyfile'] = skyfile
+
+            else:
+                tmpf = None
+
+            # turn off steps that can be skipped for extra speed:
+            self._config[self._STEP_DRZSEP]['driz_separate'] = False
+            self._config[self._STEP_MEDIAN]['median'] = False
+            self._config[self._STEP_BLOTBK]['blot'] = False
+            self._config[self._STEP_CRSREJ]['driz_cr'] = False
+            self._config[self._STEP_DRZFIN]['driz_combine'] = True
+
+            # keep the same output image size & WCS:
+            self._config[self._STEP_FINWCS]['final_wcs'] = True
+            self._config[self._STEP_FINWCS]['final_refimage'] = self.output_sci
+
+            self.execute()
+
+        except:
+            raise
+
+        finally:
+            # restore config
+            self._config = config
+
+            # close temporary skyfile:
+            if tmpf is not None:
+                tmpf.close()
+
+    def _create_skyfile(self, skyfile):
+        self._image_names_from_config()
+        img_names = self.input_image_names
+        sky_kwd = 'MDRIZSKY'
+
+        skyfile.seek(0)
+
+        for fn in img_names.keys():
+            extensions = img_names[fn]
+            with fits.open(fn) as h:
+                skyvalues = []
+                for ext in extensions:
+                    if sky_kwd in h[ext].header:
+                        skyvalues.append(h[ext].header[sky_kwd])
+                    else:
+                        raise ValueError(
+                            "Missing '{}' value for file '{}'[{:s},{:d}]"
+                            .format(sky_kwd, ext[0], ext[1]))
+
+                line = (
+                    "{:s}\t" + '\t'.join(len(skyvalues) * ['{:.15g}']) + '\n'
+                ).format(fn, *skyvalues)
+                skyfile.write(line)
+        skyfile.truncate()
+        skyfile.flush()
+        skyfile.seek(0)

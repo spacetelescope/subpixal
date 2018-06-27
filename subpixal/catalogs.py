@@ -592,7 +592,7 @@ class SExCatalog(SourceCatalog):
         if isinstance(rawcat, six.string_types):
             rawcat = ascii_io.read(rawcat, guess=False, format='sextractor')
 
-        rawcat = super().set_raw_catalog(rawcat, catmap='sextractor', origin=1)
+        super().set_raw_catalog(rawcat, catmap='sextractor', origin=1)
 
 
 class SExImageCatalog(SExCatalog):
@@ -716,7 +716,7 @@ class SExImageCatalog(SExCatalog):
         return catname
 
     @staticmethod
-    def _get_segname(sexconfig):
+    def _get_checkname(sexconfig, check_image_type):
         segname = None
         check_types = None
         check_files = None
@@ -756,7 +756,7 @@ class SExImageCatalog(SExCatalog):
             return None
 
         try:
-            idx = check_types.index('SEGMENTATION')
+            idx = check_types.index(check_image_type)
         except ValueError:
             return None
 
@@ -768,7 +768,10 @@ class SExImageCatalog(SExCatalog):
         configuration file or `None`.
 
         """
-        return SExImageCatalog._get_segname(self._sexconfig)
+        return SExImageCatalog._get_segname(
+            self._sexconfig,
+            check_image_type='SEGMENTATION'
+        )
 
     def execute(self):
         if self._dirty_img:
