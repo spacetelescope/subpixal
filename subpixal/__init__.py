@@ -8,4 +8,5 @@ from .version import *
 
 from .catalogs import *
 from .resample import *
+from .cutout import *
 from .utils import *
