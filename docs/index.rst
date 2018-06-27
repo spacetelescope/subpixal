@@ -12,6 +12,7 @@ Content
    subpixal/catalogs
    subpixal/resample
    subpixal/cutout
+   subpixal/blot
    subpixal/utils
    LICENSE.rst
 
