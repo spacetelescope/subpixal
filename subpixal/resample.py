@@ -47,6 +47,7 @@ class Resample():
         self._output_sci_data = None
         self._output_wht_data = None
         self._output_ctx_data = None
+        self._output_crclean = None
         self._input_file_names = collections.OrderedDict()
 
     @abc.abstractmethod
@@ -97,6 +98,11 @@ class Resample():
     def output_ctx(self):
         """ Get output file name for context data file or `None`. """
         return self._output_ctx_data
+
+    @property
+    def output_crclean(self):
+        """ Get file names of the Cosmic Ray (CR) cleaned images (if any). """
+        return self._output_crclean
 
     @property
     def input_image_names(self):
@@ -312,6 +318,12 @@ class Drizzle(Resample):
             #look for cosmic rays
             drizCR.rundrizCR(imgObjList, self._config,
                              procSteps=procSteps)
+
+            if self._config[self._STEP_CRSREJ]['driz_cr_corr']:
+                self._output_crclean = [im.outputNames['crcorImage']
+                                        for im in imgObjList]
+            else:
+                self._output_crclean = None
 
             #Make your final drizzled image
             adrizzle.drizFinal(imgObjList, outwcs, self._config, wcsmap=None,
