@@ -14,7 +14,7 @@ import numpy as np
 from . import __version__, __version_date__
 
 
-__all__ = ['parse_file_name']
+__all__ = ['parse_file_name', 'py2round']
 
 
 def parse_file_name(image_name):
@@ -91,3 +91,22 @@ def parse_file_name(image_name):
     else:
         raise ValueError("Invalid extension specification.")
 
+
+def py2round(x):
+    """
+    This function returns a rounded up value of the argument, similar
+    to Python 2.
+    """
+    if hasattr(x, '__iter__'):
+        rx = np.empty_like(x)
+        m = x >= 0.0
+        rx[m] = np.floor(x[m] + 0.5)
+        m = np.logical_not(m)
+        rx[m] = np.ceil(x[m] - 0.5)
+        return rx
+
+    else:
+        if x >= 0.0:
+            return np.floor(x + 0.5)
+        else:
+            return np.ceil(x - 0.5)
