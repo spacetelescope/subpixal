@@ -1,6 +1,6 @@
-*****************
-Centrod Algorithm
-*****************
+******************
+Centroid Algorithm
+******************
 
 .. moduleauthor:: Mihai Cara <help@stsci.edu>
 
