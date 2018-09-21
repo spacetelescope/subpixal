@@ -13,6 +13,8 @@ Content
    subpixal/resample
    subpixal/cutout
    subpixal/blot
+   subpixal/cc
+   subpixal/centroid
    subpixal/utils
    LICENSE.rst
 
