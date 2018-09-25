@@ -2,8 +2,12 @@
 import os
 import subprocess
 import sys
+from glob import glob
+import shutil
+import inspect
 import pkgutil
-from setuptools import setup, find_packages, Extension
+from setuptools import setup, find_packages, Extension, _install_setup_requires
+from setuptools.command.install import install
 from setuptools.command.test import test as TestCommand
 from subprocess import check_call, CalledProcessError
 
@@ -22,7 +26,7 @@ DESCRIPTION = metadata.get('description', 'A package aligning images using '
                            'sub-pixel cross correlation.')
 AUTHOR = metadata.get('author', 'Mihai Cara')
 AUTHOR_EMAIL = metadata.get('author_email', 'help@stsci.edu')
-URL = metadata.get('url', 'https://www.stsci.edu/')
+URL = metadata.get('url', 'https://hsthelp.stsci.edu/')
 LICENSE = metadata.get('license', 'BSD-3-Clause')
 
 
@@ -35,7 +39,7 @@ if not pkgutil.find_loader('relic'):
         if relic_submodule:
             check_call(['git', 'submodule', 'update', '--init', '--recursive'])
         elif not relic_local:
-            check_call(['git', 'clone', 'https://github.com/jhunkeler/relic.git'])
+            check_call(['git', 'clone', 'https://github.com/spacetelescope/relic.git'])
 
         sys.path.insert(1, 'relic')
     except CalledProcessError as e:
@@ -59,6 +63,15 @@ if not version.date:
     )
 relic.release.write_template(version, PACKAGENAME)
 
+SETUP_REQUIRES = [
+    'numpy',
+    'astropy',
+    'numpydoc',
+    'stsci_rtd_theme',
+    'sphinx',
+    'sphinx-automodapi',
+    'sphinx_rtd_theme',
+]
 
 class PyTest(TestCommand):
     def finalize_options(self):
@@ -71,7 +84,6 @@ class PyTest(TestCommand):
         import pytest
         errno = pytest.main(self.test_args)
         sys.exit(errno)
-
 
 setup(
     name=PACKAGENAME,
@@ -89,10 +101,19 @@ setup(
         'Topic :: Scientific/Engineering :: Astronomy',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
+    setup_requires=SETUP_REQUIRES,
     install_requires=[
         'numpy',
+        'astropy',
+        'scipy',
+        'stsci.tools',
+        'stwcs',
+        'drizzlepac',
+        'stsci_rtd_theme',
     ],
     tests_require=['pytest'],
     packages=find_packages(),
-    cmdclass = {'test': PyTest}
+    cmdclass={
+        'test': PyTest,
+    },
 )

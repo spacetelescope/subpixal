@@ -1,0 +1,18 @@
+name: subpixal
+channels:
+    - http://ssb.stsci.edu/astroconda
+dependencies:
+    - numpy
+    - numpydoc
+    - astropy
+    - stsci
+    - stwcs
+    - drizzlepac
+    - fitsblender
+    - graphviz
+    - matplotlib
+    - scipy
+    - sphinx
+    - sphinx-automodapi
+    - pip:
+        - git+https://github.com/spacetelescope/stsci_rtd_theme.git#egg=stsci_rtd_theme
