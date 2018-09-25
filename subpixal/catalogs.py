@@ -2,7 +2,7 @@
 A module that manages catalogs and source finding algorithms (i.e.,
 ``SExtractor`` source finding).
 
-:Author: Mihai Cara (contact: help@stsci.edu)
+:Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
 :License: :doc:`../LICENSE`
 

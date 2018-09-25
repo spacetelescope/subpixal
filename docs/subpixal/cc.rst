@@ -2,7 +2,7 @@
 Image Cross-Correlation and Interlacing
 ***************************************
 
-.. moduleauthor:: Mihai Cara <help@stsci.edu>
+.. moduleauthor:: Mihai Cara
 
 .. currentmodule:: subpixal.cc
 

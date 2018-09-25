@@ -2,7 +2,7 @@
 A module that provides algorithm for creating sub-pixel cross-correlation
 images and computing displacements.
 
-:Author: Mihai Cara (contact: help@stsci.edu)
+:Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
 :License: :doc:`../LICENSE`
 

@@ -3,7 +3,7 @@
 A module that manages resampling of images onto a common output frame
 and also "inverse" blotting.
 
-:Author: Mihai Cara (contact: help@stsci.edu)
+:Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
 :License: :doc:`../LICENSE`
 

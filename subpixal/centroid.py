@@ -2,7 +2,7 @@
 """
 Utilities for finding peak in an image.
 
-:Author: Mihai Cara (contact: help@stsci.edu)
+:Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
 :License: :doc:`../LICENSE`
 

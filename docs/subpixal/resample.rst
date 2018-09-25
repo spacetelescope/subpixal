@@ -2,7 +2,7 @@
 Image Resampling
 ****************
 
-.. moduleauthor:: Mihai Cara <help@stsci.edu>
+.. moduleauthor:: Mihai Cara
 
 .. currentmodule:: subpixal.resample
 

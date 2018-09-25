@@ -2,7 +2,7 @@
 A module that provides blotting algorithm for image cutouts and a default
 WCS-based coordinate mapping class.
 
-:Author: Mihai Cara (contact: help@stsci.edu)
+:Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
 :License: :doc:`../LICENSE`
 

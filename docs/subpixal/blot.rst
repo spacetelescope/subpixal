@@ -2,7 +2,8 @@
 Blot Algorithm for Cutouts
 **************************
 
-.. moduleauthor:: Mihai Cara <help@stsci.edu>
+.. moduleauthor:: Mihai Cara
+
 
 .. currentmodule:: subpixal.blot
 
