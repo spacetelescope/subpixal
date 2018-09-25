@@ -13,5 +13,6 @@ dependencies:
     - matplotlib
     - scipy
     - sphinx
-    - pip:
-        - git+https://github.com/spacetelescope/stsci_rtd_theme.git#egg=stsci_rtd_theme
+    - stsci_rtd_theme
+    # - pip:
+    #     - git+https://github.com/spacetelescope/stsci_rtd_theme.git#egg=stsci_rtd_theme
