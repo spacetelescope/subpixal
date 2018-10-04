@@ -12,14 +12,14 @@ Content
 .. toctree::
    :maxdepth: 2
 
-   subpixal/catalogs
-   subpixal/resample
-   subpixal/cutout
-   subpixal/blot
-   subpixal/cc
-   subpixal/centroid
-   subpixal/utils
-   LICENSE.rst
+   catalogs
+   resample
+   cutout
+   blot
+   cc
+   centroid
+   utils
+   LICENSE
 
 
 Development Notes
@@ -29,7 +29,7 @@ Development Notes
    :maxdepth: 1
    :titlesonly:
 
-   CHANGELOG.rst
+   CHANGELOG
 
 
 Indices and tables

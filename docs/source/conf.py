@@ -28,17 +28,14 @@ conf = ConfigParser()
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
-sys.path.insert(0, os.path.abspath('../../.eggs'))
-sys.path.insert(0, os.path.abspath('../../src/'))
-
-#sys.path.insert(0, os.path.abspath('../'))
-#sys.path.insert(0, os.path.abspath('packagename/'))
-#sys.path.insert(0, os.path.abspath('exts/'))
+sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('../../src'))
+sys.path.insert(0, os.path.abspath('../../build/lib*'))
+sys.path.insert(0, os.path.abspath('../../subpixal/'))
 
 # -- General configuration ------------------------------------------------
-conf.read([os.path.join(os.path.dirname(__file__), '..', 'setup.cfg')])
+conf.read([os.path.join(os.path.dirname(__file__), '../..', 'setup.cfg')])
 setup_cfg = dict(conf.items('metadata'))
 
 # If your documentation needs a minimal Sphinx version, state it here.
@@ -172,7 +169,7 @@ pygments_style = 'sphinx'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build']
+exclude_patterns = ['../_build']
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -239,7 +236,7 @@ html_theme_path = [stsci_rtd_theme.get_html_theme_path()]
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ['../_static']
 html_context = {
     'css_files': [
         '_static/css/custom.css',
@@ -248,7 +245,7 @@ html_context = {
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-html_logo = '_static/stsci_pri_combo_mark_white.png'
+html_logo = '../_static/stsci_pri_combo_mark_white.png'
 
 # Add any extra paths that contain custom files (such as robots.txt or
 # .htaccess) here, relative to this directory. These files are copied
@@ -320,7 +317,7 @@ latex_documents = [
 
 # The name of an image file (relative to this directory) to place at the top of
 # the title page.
-latex_logo = '_static/stsci_pri_combo_mark_white.png'
+latex_logo = '../_static/stsci_pri_combo_mark_white.png'
 
 # For "manual" documents, if this is true, then toplevel headings are parts,
 # not chapters.
