@@ -1,10 +1,11 @@
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 A module that provides algorithm for creating sub-pixel cross-correlation
 images and computing displacements.
 
 :Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
-:License: :doc:`../LICENSE`
+:License: :doc:`LICENSE`
 
 """
 import numpy as np

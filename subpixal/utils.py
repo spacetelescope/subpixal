@@ -1,9 +1,10 @@
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 This module provides utility functions for use by :py:mod:`subpixal` module.
 
 :Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
-:License: :doc:`../LICENSE`
+:License: :doc:`LICENSE`
 
 """
 from __future__ import (absolute_import, division, unicode_literals,

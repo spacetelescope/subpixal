@@ -1,11 +1,12 @@
 
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 A module that manages resampling of images onto a common output frame
 and also "inverse" blotting.
 
 :Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
-:License: :doc:`../LICENSE`
+:License: :doc:`LICENSE`
 
 """
 from __future__ import (absolute_import, division, unicode_literals,

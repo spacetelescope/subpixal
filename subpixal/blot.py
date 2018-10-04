@@ -1,10 +1,11 @@
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 A module that provides blotting algorithm for image cutouts and a default
 WCS-based coordinate mapping class.
 
 :Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
-:License: :doc:`../LICENSE`
+:License: :doc:`LICENSE`
 
 """
 import copy

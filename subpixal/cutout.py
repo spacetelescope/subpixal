@@ -1,9 +1,10 @@
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 A module that provides tools for creating and mapping image cutouts.
 
 :Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
-:License: :doc:`../LICENSE`
+:License: :doc:`LICENSE`
 
 """
 import numpy as np
@@ -93,14 +94,15 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
     pad = _ceil(pad) if pad >=0 else _floor(pad)
 
     # find IDs present both in the catalog AND segmentation image
-    ids = np.intersect1d(
+    ids, cat_indices, _ = np.intersect1d(
+        np.asarray(catalog.catalog['id']),
         np.setdiff1d(np.unique(segmentation_image), [0]),
-        np.asarray(catalog.catalog['id'])
+        return_indices=True
     )
 
     segments = []
 
-    for sid in ids:
+    for sid, sidx in zip(ids, cat_indices):
         # find indices of pixels having a 'sid' ID:
         mask = segmentation_image == sid
         idx = np.where(mask)
@@ -126,8 +128,10 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
         y1 -= pad
         y2 += pad
 
+        src_pos = (catalog.catalog['x'][sidx], catalog.catalog['y'][sidx])
+
         cutout = Cutout(imdata, imwcs, blc=(x1, y1), trc=(x2, y2),
-                        dq=imdq, weight=imweight, src_id=sid,
+                        src_pos=src_pos, dq=imdq, weight=imweight, src_id=sid,
                         data_units=data_units, exptime=exptime, fillval=0)
 
         cutout.mask = np.logical_or(
@@ -220,6 +224,12 @@ def create_input_image_cutouts(primary_cutouts, imdata, imwcs, imdq=None,
 
         except (NoOverlapError, PartialOverlapError):
             continue
+
+        # only when there is at least partial overlap,
+        # compute source position from the primary_cutouts to
+        # imcutouts using full WCS transformations:
+        imct.cutout_src_pos = imct.world2pix(
+            ct.pix2world([ct.cutout_src_pos]))[0].tolist()
 
         imcutouts.append(imct)
         valid_input_cutouts.append(ct)
@@ -322,6 +332,12 @@ def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
 
         except NoOverlapError:
             continue
+
+        # only when there is at least partial overlap,
+        # compute source position from the primary_cutouts to
+        # imcutouts using full WCS transformations:
+        imct.cutout_src_pos = imct.world2pix(
+            ct.pix2world([ct.cutout_src_pos]))[0].tolist()
 
         imcutouts.append(imct)
         valid_input_cutouts.append(ct)
@@ -491,6 +507,18 @@ class Cutout(object):
         When ``trc`` is set to `None`, ``trc`` is set to the shape of the
         ``data`` image: ``(nx, ny)``.
 
+    src_pos: tuple of two int, None, optional
+        Image coordinates ``(x, y)`` **in the input ``data`` image**
+        of the source contained in this cutout. If ``src_pos``
+        is set to the default value (`None`), then it will be set to the
+        center of the cutout.
+
+        .. warning::
+
+           **TODO:** The algorithm for ``src_pos`` computation
+           most likely will need to be revised to obtain better estimates
+           for the position of the source in the cutout.
+
     dq: numpy.ndarray
         Data quality array associated with image data. If provided, this
         array will be cropped the same way as image data and stored within
@@ -543,8 +571,8 @@ class Cutout(object):
     DEFAULT_QUIET = True
 
     def __init__(self, data, wcs, blc=(0, 0), trc=None,
-                 dq=None, weight=None, src_id=0, data_units='rate',
-                 exptime=1, mode='strict', fillval=np.nan):
+                 src_pos=None, dq=None, weight=None, src_id=0,
+                 data_units='rate', exptime=1, mode='strict', fillval=np.nan):
 
         if trc is None and data is None:
             raise ValueError("'trc' cannot be None when 'data' is None.")
@@ -587,6 +615,7 @@ class Cutout(object):
 
         self._blc = (blc[0], blc[1])
         self._trc = (trc[0], trc[1])
+        self.src_pos = src_pos
 
         # create data and mask arrays:
         cutout_data = np.full((self.height, self.width), fill_value=fillval,
@@ -647,6 +676,38 @@ class Cutout(object):
 
         self.exptime = exptime
         self.data_units = data_units
+
+    @property
+    def src_pos(self):
+        """ Get/set source position in the *cutout's image*. """
+        return self._src_pos
+
+    @src_pos.setter
+    def src_pos(self, src_pos):
+        """ Get/set source position in the *cutout's image*. """
+        x1, y1 = self.blc
+        if src_pos is None:
+            x2, y2 = self.trc
+            self._src_pos = (0.5 * (x1 + x2), 0.5 * (y1 + y2))
+        else:
+            self._src_pos = tuple(src_pos)[:2]
+
+    @property
+    def cutout_src_pos(self):
+        """ Get/set source position in the *cutout's image coordinates*. """
+        x1, y1 = self.blc
+        cx, cy = self._src_pos
+        return (cx - x1, cy - y1)
+
+    @cutout_src_pos.setter
+    def cutout_src_pos(self, src_pos):
+        """ Get/set source position in the *cutout's image coordinates*. """
+        x1, y1 = self.blc
+        if src_pos is None:
+            x2, y2 = self.trc
+            self._src_pos = (0.5 * (x1 + x2), 0.5 * (y1 + y2))
+        else:
+            self._src_pos = (src_pos[0] + x1, src_pos[1] + y1)
 
     @property
     def exptime(self):
@@ -718,16 +779,19 @@ class Cutout(object):
     def data(self, data):
         if data is None:
             raise ValueError("'data' cannot be None.")
-        elif data is not self._data:
-            data = np.array(data)
-            if self._data.shape != data.shape:
-                raise ValueError(
-                    "ValueError: could not broadcast input array from shape "
-                    "({:s}) into shape ({:s})"
-                    .format(','.join(map(str, data.shape)),
-                            ','.join(map(str, self._data.shape)))
-                )
-            self._data = data
+
+        elif data is self._data:
+            return
+
+        data = np.array(data)
+        if self._data.shape != data.shape:
+            raise ValueError(
+                "ValueError: could not broadcast input array from shape "
+                "({:s}) into shape ({:s})"
+                .format(','.join(map(str, data.shape)),
+                        ','.join(map(str, self._data.shape)))
+            )
+        self._data = data
 
     @property
     def mask(self):

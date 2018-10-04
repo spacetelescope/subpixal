@@ -1,10 +1,11 @@
+# Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 A module that manages catalogs and source finding algorithms (i.e.,
 ``SExtractor`` source finding).
 
 :Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
-:License: :doc:`../LICENSE`
+:License: :doc:`LICENSE`
 
 """
 from __future__ import (absolute_import, division, unicode_literals,
@@ -463,8 +464,8 @@ class SourceCatalog(object):
         # correct for 'origin':
         catalog['x'] -= self._origin
         catalog['y'] -= self._origin
-        xi = _py2round(np.asarray(catalog['x'])).astype(np.int)
-        yi = _py2round(np.asarray(catalog['y'])).astype(np.int)
+        xi = py2round(np.asarray(catalog['x'])).astype(np.int)
+        yi = py2round(np.asarray(catalog['y'])).astype(np.int)
 
         # apply mask:
         if self._mask is None:
@@ -498,8 +499,8 @@ class SourceCatalog(object):
         xi = xi[mask]
         yi = yi[mask]
         calc = np.asarray(catalog['flux'])**2 / np.asarray(catalog['fwhm'])
-        Rup = _py2round(np.asarray(catalog['radius'])).astype(np.int)
-        Aup = _py2round(np.asarray(catalog['prof-rms-a'])).astype(np.int)
+        Rup = py2round(np.asarray(catalog['radius'])).astype(np.int)
+        Aup = py2round(np.asarray(catalog['prof-rms-a'])).astype(np.int)
         Rlg = 2 * Rup * Aup
         xs = xi - Rlg
         xe = xi + Rlg

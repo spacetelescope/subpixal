@@ -4,7 +4,7 @@ Utilities for finding peak in an image.
 
 :Author: Mihai Cara (for help, contact `HST Help Desk <https://hsthelp.stsci.edu>`_)
 
-:License: :doc:`../LICENSE`
+:License: :doc:`LICENSE`
 
 """
 from __future__ import (absolute_import, division, unicode_literals,
