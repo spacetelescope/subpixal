@@ -9,4 +9,5 @@ for correcting image ``FITS WCS`` using known linear transformations.
 
 
 .. warning::
-   This package is work in progress and thus it is not ready for distribution.
+
+    This package is work in progress and thus it is not ready for distribution.
