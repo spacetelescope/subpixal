@@ -11,6 +11,9 @@ import numpy as np
 from astropy.io import fits
 from astropy import wcs as fitswcs
 from stwcs.wcsutil import HSTWCS
+from stsci.tools.bitmask import bitfield_to_boolean_mask
+
+from .catalogs import ImageCatalog
 
 
 __all__ = ['Cutout', 'create_primary_cutouts', 'create_cutouts',
@@ -42,15 +45,15 @@ class PartialOverlapError(ValueError):
 
 
 def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
-                           imdq=None, imweight=None, data_units='counts',
-                           exptime=1, pad=1):
+                           imdq=None, dqbitmask=0, imweight=None,
+                           data_units='counts', exptime=1, pad=1):
     """
     A function for creating first-order cutouts from a (drizzle-)combined
     image given a source catalog and a segmentation image.
 
     Parameters
     ----------
-    catalog : SourceCatalog, astropy.table.Table
+    catalog : ImageCatalog, astropy.table.Table
         A table of sources which need to be extracted. ``catalog`` must contain
         a column named ``'id'`` which contains IDs of segments from the
         ``segmentation_image``.
@@ -66,7 +69,41 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
         World coordinate system of image ``imdata``.
 
     imdq: numpy.ndarray, None, optional
-        Data quality array corresponding to ``imdata``.
+        Data quality (DQ) array corresponding to ``imdata``.
+
+    dqbitmask : int, str, None, optional
+        Integer sum of all the DQ bit values from the input ``imdq``
+        DQ array that should be considered "good" when building masks for
+        cutouts. For example, if pixels in the DQ array can be
+        combinations of 1, 2, 4, and 8 flags and one wants to consider DQ
+        "defects" having flags 2 and 4 as being acceptable, then ``dqbitmask``
+        should be set to 2+4=6. Then a DQ pixel having values 2,4, or 6
+        will be considered a good pixel, while a DQ pixel with a value,
+        e.g., 1+2=3, 4+8=12, etc. will be flagged as a "bad" pixel.
+
+        Alternatively, one can enter a comma- or '+'-separated list
+        of integer bit flags that should be added to obtain the
+        final "good" bits. For example, both ``4,8`` and ``4+8``
+        are equivalent to setting ``dqbitmask`` to 12.
+
+        | Default value (0) will make *all* non-zero
+          pixels in the DQ mask to be considered "bad" pixels, and the
+          corresponding image pixels will be flagged in the ``mask`` property
+          of the returned cutouts.
+
+        | Set ``dqbitmask`` to `None` to not consider DQ array when computing
+          cutout's ``mask``.
+
+        | In order to reverse the meaning of the ``dqbitmask``
+          parameter from indicating values of the "good" DQ flags
+          to indicating the "bad" DQ flags, prepend '~' to the string
+          value. For example, in order to mask only pixels that have
+          corresponding DQ flags 4 and 8 and to consider
+          as "good" all other pixels set ``dqbitmask`` to ``~4+8``, or ``~4,8``.
+          To obtain the same effect with an `int` input value (except for 0),
+          enter ``-(4+8+1)=-9``. Following this convention,
+          a ``dqbitmask`` string value of ``'~0'`` would be equivalent to
+          setting ``dqbitmask=None``.
 
     imweight: numpy.ndarray, None, optional
         Pixel weight array corresponding to ``imdata``.
@@ -89,13 +126,15 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
         A list of extracted ``Cutout`` s.
 
     """
+    if isinstance(catalog, ImageCatalog):
+        catalog = catalog.catalog
 
     ny, nx = segmentation_image.shape
     pad = _ceil(pad) if pad >=0 else _floor(pad)
 
     # find IDs present both in the catalog AND segmentation image
     ids, cat_indices, _ = np.intersect1d(
-        np.asarray(catalog.catalog['id']),
+        np.asarray(catalog['id']),
         np.setdiff1d(np.unique(segmentation_image), [0]),
         return_indices=True
     )
@@ -128,24 +167,28 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
         y1 -= pad
         y2 += pad
 
-        src_pos = (catalog.catalog['x'][sidx], catalog.catalog['y'][sidx])
+        src_pos = (catalog['x'][sidx], catalog['y'][sidx])
 
         cutout = Cutout(imdata, imwcs, blc=(x1, y1), trc=(x2, y2),
                         src_pos=src_pos, dq=imdq, weight=imweight, src_id=sid,
                         data_units=data_units, exptime=exptime, fillval=0)
 
-        cutout.mask = np.logical_or(
-            cutout.mask,
-            np.logical_not(mask[cutout.extraction_slice])
-        )
-        segments.append(cutout)
+        cutout.mask |= np.logical_not(mask[cutout.extraction_slice])
+
+        if imdq is not None:
+            cutout.mask |= bitfield_to_boolean_mask(
+                cutout.dq, ignore_flags=dqbitmask, good_mask_value=False
+            )
+
+        if not np.all(cutout.mask): # ignore cutouts without any good pixels
+            segments.append(cutout)
 
     return segments
 
 
 def create_input_image_cutouts(primary_cutouts, imdata, imwcs, imdq=None,
-                               imweight=None, data_units='counts', exptime=1,
-                               pad=1):
+                               dqbitmask=0, imweight=None, data_units='counts',
+                               exptime=1, pad=1):
     """
     A function for creating cutouts in one image from cutouts from another
     image. Specifically, this function maps input cutouts to quadrilaterals
@@ -168,6 +211,11 @@ def create_input_image_cutouts(primary_cutouts, imdata, imwcs, imdq=None,
 
     imdq: numpy.ndarray, None, optional
         Data quality array corresponding to ``imdata``.
+
+    dqbitmask : int, str, None, optional
+        Integer sum of all the DQ bit values from the input ``imdq``
+        DQ array that should be considered "good" when building masks for
+        cutouts. For more details, see `create_primary_cutouts`.
 
     imweight: numpy.ndarray, None, optional
         Pixel weight array corresponding to ``imdata``.
@@ -222,6 +270,14 @@ def create_input_image_cutouts(primary_cutouts, imdata, imwcs, imdq=None,
                           dq=imdq, weight=imweight, src_id=ct.src_id,
                           data_units=data_units, exptime=exptime, fillval=0)
 
+            if imdq is not None:
+                imct.mask |= bitfield_to_boolean_mask(
+                    imct.dq, ignore_flags=dqbitmask, good_mask_value=False
+                )
+
+            if np.all(imct.mask):
+                continue
+
         except (NoOverlapError, PartialOverlapError):
             continue
 
@@ -238,8 +294,8 @@ def create_input_image_cutouts(primary_cutouts, imdata, imwcs, imdq=None,
 
 
 def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
-                           imdq=None, imweight=None, data_units='counts',
-                           exptime=1, pad=1):
+                           imdq=None, dqbitmask=0, imweight=None,
+                           data_units='counts', exptime=1, pad=1):
     """
     A function for creating cutouts in one image from cutouts from another
     image. Specifically, this function maps input cutouts to quadrilaterals
@@ -275,6 +331,11 @@ def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
 
     imdq: numpy.ndarray, None, optional
         Data quality array corresponding to ``imdata``.
+
+    dqbitmask : int, str, None, optional
+        Integer sum of all the DQ bit values from the input ``imdq``
+        DQ array that should be considered "good" when building masks for
+        cutouts. For more details, see `create_primary_cutouts`.
 
     imweight: numpy.ndarray, None, optional
         Pixel weight array corresponding to ``imdata``.
@@ -327,10 +388,21 @@ def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
                           dq=imdq, weight=imweight, src_id=ct.src_id,
                           data_units=data_units, exptime=exptime, mode='fill',
                           fillval=0)
-            seg = segmentation_image[imct.extraction_slice]
-            imct.mask |= ~(seg == ct.src_id)
 
         except NoOverlapError:
+            continue
+
+        # update cutout mask with segmentation image:
+        seg = np.zeros_like(imct.data)
+        seg[imct.insertion_slice] = segmentation_image[imct.extraction_slice]
+        imct.mask |= ~(seg == ct.src_id)
+
+        if imdq is not None:
+            imct.mask |= bitfield_to_boolean_mask(
+                imct.dq, ignore_flags=dqbitmask, good_mask_value=False
+            )
+
+        if np.all(imct.mask):
             continue
 
         # only when there is at least partial overlap,
@@ -347,9 +419,9 @@ def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
 
 def create_cutouts(primary_cutouts, segmentation_image,
                    drz_data, drz_wcs, flt_data, flt_wcs,
-                   drz_dq=None, drz_weight=None,
+                   drz_dq=None, drz_dqbitmask=0, drz_weight=None,
                    drz_data_units='rate', drz_exptime=1,
-                   flt_dq=None, flt_weight=None,
+                   flt_dq=None, flt_dqbitmask=0, flt_weight=None,
                    flt_data_units='counts', flt_exptime=1,
                    pad=2):
     """
@@ -396,6 +468,11 @@ def create_cutouts(primary_cutouts, segmentation_image,
     drz_dq: numpy.ndarray, None, optional
         Data quality array corresponding to ``drz_data``.
 
+    drz_dqbitmask : int, str, None, optional
+        Integer sum of all the DQ bit values from the input ``drz_dq``
+        DQ array that should be considered "good" when building masks for
+        cutouts. For more details, see `create_primary_cutouts`.
+
     drz_weight: numpy.ndarray, None, optional
         Pixel weight array corresponding to ``drz_data``.
 
@@ -410,6 +487,11 @@ def create_cutouts(primary_cutouts, segmentation_image,
 
     flt_dq: numpy.ndarray, None, optional
         Data quality array corresponding to ``flt_data``.
+
+    flt_dqbitmask : int, str, None, optional
+        Integer sum of all the DQ bit values from the input ``flt_dq``
+        DQ array that should be considered "good" when building masks for
+        cutouts. For more details, see `create_primary_cutouts`.
 
     flt_weight: numpy.ndarray, None, optional
         Pixel weight array corresponding to ``flt_data``.
@@ -448,6 +530,7 @@ def create_cutouts(primary_cutouts, segmentation_image,
         imdata=flt_data,
         imwcs=flt_wcs,
         imdq=flt_dq,
+        dqbitmask=flt_dqbitmask,
         imweight=flt_weight,
         data_units=flt_data_units,
         exptime=flt_exptime,
@@ -466,6 +549,7 @@ def create_cutouts(primary_cutouts, segmentation_image,
         imdata=drz_data,
         imwcs=drz_wcs,
         imdq=drz_dq,
+        dqbitmask=drz_dqbitmask,
         imweight=drz_weight,
         data_units=drz_data_units,
         exptime=drz_exptime,
@@ -572,7 +656,8 @@ class Cutout(object):
 
     def __init__(self, data, wcs, blc=(0, 0), trc=None,
                  src_pos=None, dq=None, weight=None, src_id=0,
-                 data_units='rate', exptime=1, mode='strict', fillval=np.nan):
+                 data_units='rate', exptime=1, mode='strict',
+                 fillval=np.nan):
 
         if trc is None and data is None:
             raise ValueError("'trc' cannot be None when 'data' is None.")
@@ -635,6 +720,9 @@ class Cutout(object):
             cutout_data[insert_slice] = data[extract_slice]
         self._mask[insert_slice] = False
 
+        # flag "bad" (NaN, inf) pixels:
+        self._mask |= np.logical_not(np.isfinite(cutout_data))
+
         # get DQ array if provided:
         if dq is None:
             self._dq = None
@@ -644,7 +732,7 @@ class Cutout(object):
                 raise ValueError("Image's DQ array shape must match the shape "
                                  "of image 'data'.")
 
-            self._dq = np.zeros_like(data, dtype=dq.dtype)
+            self._dq = np.zeros_like(cutout_data, dtype=dq.dtype)
             self._dq[insert_slice] = dq[extract_slice]
 
         # get weights array if provided:

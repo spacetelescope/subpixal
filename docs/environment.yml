@@ -3,7 +3,7 @@ channels:
     - http://ssb.stsci.edu/astroconda
     - conda-forge
 dependencies:
-    - python=3.5
+    - python>=3.5
     - numpy
     - numpydoc
     - scipy

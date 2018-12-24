@@ -109,7 +109,7 @@ setup(
         'nose',
         'stsci.tools',
         'stwcs',
-        'drizzlepac',
+        'drizzlepac>=2.2.6',
         'sphinx_rtd_theme',
         'stsci_rtd_theme',
         'sphinx',

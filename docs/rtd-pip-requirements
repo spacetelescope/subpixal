@@ -3,6 +3,3 @@ scipy
 matplotlib
 astropy
 stsci.tools
-stsci.skypac
-drizzlepac
-stwcs

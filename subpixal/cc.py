@@ -18,7 +18,8 @@ from . import __version__, __version_date__
 __all__ = ['find_displacement']
 
 
-def find_displacement(ref_image, image00, image10, image01, image11):
+def find_displacement(ref_image, image00, image10, image01, image11,
+                      full_output=False):
     """
     Find subpixel displacements between one reference cutout and a set of
     four "dithered" cutouts. This is achieved by finding peak position in a
@@ -57,8 +58,16 @@ def find_displacement(ref_image, image00, image10, image01, image11):
         Displacement of ``image00`` with regard to ``ref_image`` along the
         Y-axis (rows).
 
+    icc : numpy.ndarray, Optional
+        Interlaced ("supersampled") cross-correlation image. Returned only when
+        ``full_output`` is `True`.
+
     """
-    icc = _build_icc_image(ref_image, image00, image10, image01, image11)
+    icc, ccs = _build_icc_image(ref_image, image00, image10, image01, image11)
+
+    # xc = (icc.shape[1] - 1) // 4
+    # yc = (icc.shape[0] - 1) // 4
+    # xm, ym = find_peak(icc, xmax=2*xc, ymax=2*yc, peak_fit_box=5, peak_search_box='fitbox')
 
     xm, ym = find_peak(icc, peak_fit_box=5, peak_search_box='all')
 
@@ -69,7 +78,7 @@ def find_displacement(ref_image, image00, image10, image01, image11):
     dx = 0.5 * xm - xc
     dy = 0.5 * ym - yc
 
-    return (dx, dy)
+    return (dx, dy, icc, ccs) if full_output else (dx, dy)
 
 
 def _build_icc_image(ref, im00, im10, im01, im11):
@@ -91,9 +100,9 @@ def _build_icc_image(ref, im00, im10, im01, im11):
     # an "over-sampled" cross-correlation image:
     ny, nx = cc00.shape
     icc = np.empty((2 * ny, 2 * nx), dtype=cc00.dtype.type)
-    icc[::2, ::2] = cc00[::-1,::-1]
+    icc[::2, ::2] = cc00[::-1, ::-1]
     icc[::2, 1::2] = cc10[::-1,::-1]
-    icc[1::2, ::2] = cc01[::-1,::-1]
-    icc[1::2, 1::2] = cc11[::-1,::-1]
+    icc[1::2, ::2] = cc01[::-1, ::-1]
+    icc[1::2, 1::2] = cc11[::-1, ::-1]
 
-    return icc
+    return icc, (cc00, cc10, cc01, cc11)

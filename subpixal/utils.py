@@ -7,15 +7,13 @@ This module provides utility functions for use by :py:mod:`subpixal` module.
 :License: :doc:`LICENSE`
 
 """
-from __future__ import (absolute_import, division, unicode_literals,
-                        print_function)
-
 import numpy as np
+from astropy.io import fits
 
 from . import __version__, __version_date__
 
 
-__all__ = ['parse_file_name', 'py2round']
+__all__ = ['parse_file_name', 'py2round', 'get_ext_list']
 
 
 def parse_file_name(image_name):
@@ -42,9 +40,9 @@ def parse_file_name(image_name):
 
     Examples
     --------
->>> import subpixal
->>> subpixal.parse_file_name('j1234568q_flt.fits[sci,2]')
-('SCI', 2)
+    >>> import subpixal
+    >>> subpixal.utils.parse_file_name('j1234568q_flt.fits[sci,2]')
+    ('j1234568q_flt.fits', ('sci', 2))
 
     """
     numbra = image_name.count('[')
@@ -93,6 +91,54 @@ def parse_file_name(image_name):
         raise ValueError("Invalid extension specification.")
 
 
+def get_ext_list(image, extname='SCI'):
+    """
+    Return a list of all extension versions of `extname` extensions.
+    `image` can be either a file name or a `astropy.io.fits.HDUList` object.
+
+    This function returns a list of fully qualified extensions: a list of
+    tuples of the form (``'extname'``, ``'extver'``).
+
+    Examples
+    --------
+    >>> get_ext_list('j9irw1rqq_flt.fits')
+    [('SCI', 1), ('SCI', 2)]
+
+    """
+    if not isinstance(extname, str):
+        raise TypeError("Argument 'extname' must be either a string "
+                        "indicating the value of the 'EXTNAME' keyword of the "
+                        "extensions whose versions are to be returned.")
+
+    extname = extname.upper()
+
+    close = False
+
+    try:
+        if isinstance(img, (str, bytes)):
+            image = fits.open(image, mode='update')
+            close = True
+
+        elif not isinstance(image, fits.HDUList):
+            raise TypeError("Argument 'imgage' must be either a file name, "
+                            "or an astropy.io.fits.HDUList object.")
+
+        ext = []
+        for e in hdulist:
+            hdr = e.header
+            if 'EXTNAME' in hdr and hdr['EXTNAME'].upper() == extname:
+                ext.append((extname, hdr['EXTVER'] if 'EXTVER' in hdr else 1))
+
+    except:
+        raise
+
+    finally:
+        if close:
+            image.close()
+
+    return ext
+
+
 def py2round(x):
     """
     This function returns a rounded up value of the argument, similar
@@ -111,3 +157,35 @@ def py2round(x):
             return np.floor(x + 0.5)
         else:
             return np.ceil(x - 0.5)
+
+
+def _create_tmp_fits_file(image, prefix='tmp_'):
+    tmpf = None
+    close_image = False
+    try:
+        if isinstance(image, np.ndarray):
+            image = fits.PrimaryHDU(image)
+
+        elif not isinstance(image, fits.HDUList):
+            image = fits.open(image)
+            close_image = True
+
+        tmpf = tempfile.NamedTemporaryFile(
+            mode='wb', suffix='.fits', prefix=prefix, dir='./',
+            delete=True,
+        )
+
+        image.writeto(tmpf)
+        tmpf.file.flush()
+        tmpf.file.seek(0)
+
+    except:
+        if tmpf is not None:
+            tmpf.close()
+        raise
+
+    finally:
+        if close_image:
+            image.close()
+
+    return tmpf

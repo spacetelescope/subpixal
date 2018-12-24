@@ -9,9 +9,6 @@ and also "inverse" blotting.
 :License: :doc:`LICENSE`
 
 """
-from __future__ import (absolute_import, division, unicode_literals,
-                        print_function)
-
 import sys
 import os
 import abc
@@ -19,7 +16,6 @@ import copy
 import collections
 import tempfile
 
-import six
 from astropy.io import fits
 
 from stsci.tools import teal, logutil, textutil, cfgpars, fileutil
@@ -37,8 +33,7 @@ log = logutil.create_logger(__name__, level=logutil.logging.NOTSET)
 __all__ = ['Resample', 'Drizzle']
 
 
-@six.add_metaclass(abc.ABCMeta)
-class Resample():
+class Resample(abc.ABC):
     """ An abstract class providing interface for resampling and combining
     sets of images onto a rectified frame.
 
@@ -50,6 +45,13 @@ class Resample():
         self._output_ctx_data = None
         self._output_crclean = None
         self._input_file_names = collections.OrderedDict()
+        self._reference_image = None
+        self._computed_sky = None
+
+    @abc.abstractmethod
+    def set_config_parameters(self, **kwargs):
+        """ Override individual configuration parameters. """
+        pass
 
     @abc.abstractmethod
     def execute(self):
@@ -107,8 +109,31 @@ class Resample():
 
     @property
     def input_image_names(self):
-        """ Get a list of input file names or `None`. """
-        return self._input_file_names
+        """ Get an `OrderedDict` of input file names and image extensions or
+        `None`.
+        """
+        return list(self._input_file_names.items())
+
+    @property
+    def reference_image(self):
+        """ Get/Set Reference image. When ``reference_image`` is `None`,
+        output WCS and grid are computed automatically.
+        """
+        return self._reference_image
+
+    @reference_image.setter
+    @abc.abstractmethod
+    def reference_image(self, ref_image):
+        pass
+
+    @property
+    def computed_sky(self):
+        return self._computed_sky
+
+    @computed_sky.setter
+    def computed_sky(self, computed_sky):
+        self._computed_sky = copy.deepcopy(computed_sky)
+
 
 class Drizzle(Resample):
     """
@@ -158,10 +183,38 @@ class Drizzle(Resample):
 
         #return new_copy_obj
 
+    def set_config_parameters(self, **kwargs):
+        self.set_config(config=self._config, **kwargs)
+
+    @property
+    def reference_image(self):
+        cfg = self._config[self._STEP_FINWCS]
+        return cfg['final_refimage'] if cfg['final_wcs'] else None
+
+    @reference_image.setter
+    def reference_image(self, ref_image):
+        """ Set Reference image. """
+        if isinstance(ref_image, str):
+            custom_wcs = len(ref_image.strip()) > 0
+        else:
+            custom_wcs = ref_image is not None
+
+        self.set_config_parameters(
+            final_wcs=custom_wcs,
+            final_refimage=ref_image,
+            final_rot=None,
+            final_scale=None,
+            final_outnx=None,
+            final_outny=None,
+            final_ra=None,
+            final_dec=None,
+            final_crpix1=None,
+            final_crpix2=None
+        )
 
     def set_config(self, config=None, **kwargs):
         # Load any user-specified config
-        if isinstance(config, six.string_types):
+        if isinstance(config, str):
             if config == 'defaults':
                 # load "TEAL"-defaults (from ~/.teal/):
                 config = teal.load(self.taskname)
@@ -185,6 +238,11 @@ class Drizzle(Resample):
             self._config = util.getDefaultConfigObj(self.taskname, config,
                                                     kwargs, loadOnly=True)
             self._image_names_from_config()
+
+            # initialize computed sky values:
+            self._computed_sky = {}
+            for fn, extensions in self._input_file_names.items():
+                self._computed_sky[fn] = {ext: None for ext in extensions}
 
             # If user specifies optional parameter for final_wcs specification
             # in kwargs, insure that the final_wcs step gets turned on
@@ -303,6 +361,7 @@ class Drizzle(Resample):
 
             #subtract the sky
             sky.subtractSky(imgObjList, self._config, procSteps=procSteps)
+            self._get_computed_sky(imgObjList)
 
             #drizzle to separate images
             adrizzle.drizSeparate(imgObjList, outwcs, self._config,
@@ -394,6 +453,8 @@ class Drizzle(Resample):
         imname = collections.OrderedDict()
         auto_group = config['group'] is None or config['group'].strip() == ''
 
+        sky = {}
+
         for f in files:
             image = processInput._getInputImage(f, group=config['group'])
             if auto_group:
@@ -423,6 +484,23 @@ class Drizzle(Resample):
             imname[image._filename] = [(image.scienceExt, i) for i in extvers]
 
         self._input_file_names = imname
+
+    def _get_computed_sky(self, imobj):
+        """ Return a dictionary of computed sky values. """
+        sky = {}
+        config = self._config
+        auto_group = config['group'] is None or config['group'].strip() == ''
+
+        for image in imobj:
+            sky[image._filename] = {}
+            if auto_group:
+                extvers = list(range(1, image._numchips + 1))
+            else:
+                extvers = image.group
+            ext = [(image.scienceExt, i) for i in extvers]
+            sky[image._filename] = {e: image[e].computedSky for e in ext}
+
+        self._computed_sky = sky
 
     def fast_drop_image(self, drop_file_name):
         """ Re-calculate resampled image using all input images other than
@@ -477,7 +555,7 @@ class Drizzle(Resample):
             # Both files are identical. Nothing to do...
             return
 
-        fnames = list(self.input_image_names.keys())
+        fnames = list(self._input_file_names.keys())
         modified = True
 
         if drop_file_name is not None:
@@ -529,8 +607,9 @@ class Drizzle(Resample):
             self._config[self._STEP_DRZFIN]['driz_combine'] = True
 
             # keep the same output image size & WCS:
-            self._config[self._STEP_FINWCS]['final_wcs'] = True
-            self._config[self._STEP_FINWCS]['final_refimage'] = self.output_sci
+            if not self._config[self._STEP_FINWCS]['final_wcs']:
+                self._config[self._STEP_FINWCS]['final_wcs'] = True
+                self._config[self._STEP_FINWCS]['final_refimage'] = self.output_sci
 
             self.execute()
 
@@ -547,13 +626,12 @@ class Drizzle(Resample):
 
     def _create_skyfile(self, skyfile):
         self._image_names_from_config()
-        img_names = self.input_image_names
         sky_kwd = 'MDRIZSKY'
 
         skyfile.seek(0)
 
-        for fn in img_names.keys():
-            extensions = img_names[fn]
+        for fn in self._input_file_names.keys():
+            extensions = self._input_file_names[fn]
             with fits.open(fn) as h:
                 skyvalues = []
                 for ext in extensions:
