@@ -64,11 +64,6 @@ def find_displacement(ref_image, image00, image10, image01, image11,
 
     """
     icc, ccs = _build_icc_image(ref_image, image00, image10, image01, image11)
-
-    # xc = (icc.shape[1] - 1) // 4
-    # yc = (icc.shape[0] - 1) // 4
-    # xm, ym = find_peak(icc, xmax=2*xc, ymax=2*yc, peak_fit_box=5, peak_search_box='fitbox')
-
     xm, ym = find_peak(icc, peak_fit_box=5, peak_search_box='all')
 
     # find center of the auto-correlation peak when using signal.fftconvolve:
