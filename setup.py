@@ -1,15 +1,15 @@
 #!/usr/bin/env python
-import os
-import subprocess
 import sys
-from glob import glob
+import os
 import shutil
 import inspect
 import pkgutil
+import importlib
+from subprocess import check_call, CalledProcessError
+from configparser import ConfigParser
 from setuptools import setup, find_packages, Extension, _install_setup_requires
 from setuptools.command.install import install
 from setuptools.command.test import test as TestCommand
-from subprocess import check_call, CalledProcessError
 
 try:
     from distutils.config import ConfigParser
@@ -24,11 +24,18 @@ metadata = dict(conf.items('metadata'))
 PACKAGENAME = metadata.get('package_name', 'subpixal')
 DESCRIPTION = metadata.get('description', 'A package aligning images using '
                            'sub-pixel cross correlation.')
+LONG_DESCRIPTION = metadata.get('long_description', 'README.rst')
+LONG_DESCRIPTION_CONTENT_TYPE = metadata.get('long_description_content_type',
+                                             'text/x-rst')
 AUTHOR = metadata.get('author', 'Mihai Cara')
 AUTHOR_EMAIL = metadata.get('author_email', 'help@stsci.edu')
 URL = metadata.get('url', 'https://hsthelp.stsci.edu/')
 LICENSE = metadata.get('license', 'BSD-3-Clause')
 
+# load long description
+this_dir = os.path.abspath(os.path.dirname(__file__))
+with open(os.path.join(this_dir, LONG_DESCRIPTION), encoding='utf-8') as f:
+    long_description = f.read()
 
 if not pkgutil.find_loader('relic'):
     relic_local = os.path.exists('relic')
@@ -46,7 +53,7 @@ if not pkgutil.find_loader('relic'):
         print(e)
         exit(1)
 
-import relic.release  # noqa
+import relic.release
 
 version = relic.release.get_info()
 if not version.date:
@@ -61,17 +68,63 @@ if not version.date:
         commit='',
         post='-1'
     )
-relic.release.write_template(version, PACKAGENAME)
+relic.release.write_template(version,  os.path.join(*PACKAGENAME.split('.')))
 
+# Install packages required for this setup to proceed:
 SETUP_REQUIRES = [
     'numpy',
-    'astropy',
-    'numpydoc',
-    'stsci_rtd_theme',
-    'sphinx',
-    'sphinx-automodapi',
-    'sphinx_rtd_theme',
 ]
+
+_install_setup_requires(dict(setup_requires=SETUP_REQUIRES))
+
+for dep_pkg in SETUP_REQUIRES:
+    try:
+        importlib.import_module(dep_pkg)
+    except ImportError:
+        print("{0} is required in order to install '{1}'.\n"
+              "Please install {0} first.".format(dep_pkg, PACKAGENAME),
+              file=sys.stderr)
+        exit(1)
+
+PACKAGE_DATA = {
+    '': [
+        'README.rst',
+        'LICENSE.txt',
+        'CHANGELOG.rst',
+        '*.fits',
+        '*.txt',
+        '*.inc',
+        '*.cfg',
+        '*.csv',
+        '*.yaml',
+        '*.json'
+        ],
+}
+
+INSTALL_REQUIRES=[
+    'numpy',
+    'scipy',
+    'astropy>=3.1',
+    'stsci.tools',
+    'stsci.skypac',
+    'stwcs',
+    'drizzlepac>=2.2.6',
+]
+
+
+# Setup C module include directories
+import numpy
+include_dirs = [numpy.get_include()]
+
+# Setup C module macros
+define_macros = [('NUMPY', '1')]
+
+# Handle MSVC `wcsset` redefinition
+if sys.platform == 'win32':
+    define_macros += [
+        ('_CRT_SECURE_NO_WARNING', None),
+        ('__STDC__', 1)
+    ]
 
 class PyTest(TestCommand):
     def finalize_options(self):
@@ -92,6 +145,8 @@ setup(
     author_email=AUTHOR_EMAIL,
     description=DESCRIPTION,
     license=LICENSE,
+    long_description=long_description,
+    long_description_content_type=LONG_DESCRIPTION_CONTENT_TYPE,
     url=URL,
     classifiers=[
         'Intended Audience :: Science/Research',
@@ -100,23 +155,20 @@ setup(
         'Programming Language :: Python',
         'Topic :: Scientific/Engineering :: Astronomy',
         'Topic :: Software Development :: Libraries :: Python Modules',
+        'Development Status :: 3 - Alpha',
     ],
+    python_requires='>=3.5',
     setup_requires=SETUP_REQUIRES,
-    install_requires=[
-        'numpy',
-        'astropy',
-        'scipy',
-        'nose',
-        'stsci.tools',
-        'stwcs',
-        'drizzlepac>=2.2.6',
-        'sphinx_rtd_theme',
-        'stsci_rtd_theme',
-        'sphinx',
-    ],
+    install_requires=INSTALL_REQUIRES,
     tests_require=['pytest'],
     packages=find_packages(),
+    package_data=PACKAGE_DATA,
     cmdclass={
         'test': PyTest,
     },
+    project_urls={
+        'Bug Reports': 'https://github.com/spacetelescope/subpixal/issues/',
+        'Source': 'https://github.com/spacetelescope/subpixal/',
+        'Help': 'https://hsthelp.stsci.edu/',
+        },
 )

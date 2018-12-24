@@ -8,6 +8,8 @@ Release Notes
 subpixal (DEVELOPMENT)
 ======================
 
+- Setup dependency clean-up. [#31]
+
 - Fix changelog. [#30]
 
 subpixal v0.0.2 (23-December-2018)
