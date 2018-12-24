@@ -8,4 +8,5 @@ Source Catalogs
 
 .. automodule:: subpixal.catalogs
    :members:
+   :inherited-members:
    :undoc-members:

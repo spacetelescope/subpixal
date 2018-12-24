@@ -7,9 +7,6 @@ Utilities for finding peak in an image.
 :License: :doc:`LICENSE`
 
 """
-from __future__ import (absolute_import, division, unicode_literals,
-                        print_function)
-
 import numpy as np
 from .utils import py2round
 
@@ -153,7 +150,10 @@ optional
                 jmax += y1
                 coord = (float(imax), float(jmax))
 
-        auto_expand_search = (sbx != nx or sby != ny)
+            auto_expand_search = (sbx != nx or sby != ny)
+
+        else:
+            auto_expand_search = False
 
     wx, wy = _process_box_pars(peak_fit_box)
 
@@ -204,8 +204,7 @@ optional
             return coord
 
     try:
-        #c = np.linalg.lstsq(v, d, rcond=None)[0]
-        c = np.linalg.lstsq(v, d)[0]
+        c = np.linalg.lstsq(v, d, rcond=None)[0]
     except np.linalg.LinAlgError:
         print("WARNING: Least squares failed!\n{}".format(c))
         if auto_expand_search:

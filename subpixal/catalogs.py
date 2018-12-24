@@ -8,43 +8,39 @@ A module that manages catalogs and source finding algorithms (i.e.,
 :License: :doc:`LICENSE`
 
 """
-from __future__ import (absolute_import, division, unicode_literals,
-                        print_function)
-
-import copy
+import os
 import sys
+import copy
 import subprocess
+import abc
+import tempfile
 
-import six
 import numpy as np
 from astropy.io import ascii as ascii_io
+from astropy.io import fits
+from astropy.table import Table
 
 from stsci.skypac import parseat
 
-from . utils import py2round
+from . utils import py2round, _create_tmp_fits_file
 
 
-__all__ = ['SourceCatalog', 'SExCatalog', 'SExImageCatalog']
-
-
-_INT_TYPE = (int, long,) if sys.version_info < (3,) else (int,)
+__all__ = ['ImageCatalog', 'SExImageCatalog']
 
 
 def _is_int(n):
     return (
-        (isinstance(n, _INT_TYPE) and not isinstance(n, bool)) or
+        (isinstance(n, int) and not isinstance(n, bool)) or
         (isinstance(n, np.generic) and np.issubdtype(n, np.integer))
     )
 
 
-class SourceCatalog(object):
+class ImageCatalog(abc.ABC):
     """
-    A class for handling catalog data: storing, filtering, and retrieving
-    sources.
-
+    A class for finding sources in images and handling catalog data: storing,
+    filtering, and retrieving sources.
 
     """
-
     _CMP_MAP = {
         '>': np.greater,
         '>=': np.greater_equal,
@@ -71,23 +67,69 @@ class SourceCatalog(object):
     }
 
     def __init__(self):
-        self._rawcat = None
-        self._rawcat_colnames = None
-        self._origin = 0
-        self._catalog = None
-        self._mask = None
-        self._dirty = False
+        self._filters = []
         self._required_colnames = [
             'id', 'x', 'y', 'flux', 'radius', 'prof-rms-a', 'prof-rms-b',
             'stellarity', 'fwhm'
         ]
-        self._catmap = {i: i for i in self._required_colnames}
+        self._derived_colnames = ['pos_snr']
         self.set_default_filters()
 
+        self._image = None
+        self._image_ext = None
+        colnames = self._required_colnames + self._derived_colnames
+        self._catalog = self._empty_catalog()
+
+    def _empty_catalog(self):
+        colnames = self._required_colnames + self._derived_colnames
+        cat = Table(
+            names=colnames,
+            dtype=[np.int64] + (len(colnames) - 1) * [np.float64]
+        )
+        return cat
+
+    def set_image(self, image):
+        """
+        Set image to be used for source finding.
+
+        Parameters
+        ----------
+        image: numpy.ndarray, str
+            When setting an image either a `numpy.ndarray` of image data or
+            a string file name is acceptable. Image file name may be followed
+            by an extension specification such as ``'file1.fits[1]'`` or
+            ``'file1.fits[(sci,1)]'`` (by default, the first image-like
+            extension will be used).
+
+        """
+        self._image = image
+        self._image_ext = None
+
+        if isinstance(image, str):
+            files = parseat.parse_cs_line(
+                image, default_ext='*', clobber=False, fnamesOnly=False,
+                doNotOpenDQ=True, im_fmode='readonly', dq_fmode='readonly',
+                msk_fmode='readonly', logfile=None, verbose=False
+            )
+
+            if len(files) > 1:
+                for f in files:
+                    f.release_all_images()
+                raise ValueError("Only a single file can be specified as "
+                                 "an image.")
+
+            # get extension number
+            self._image_ext = files[0].image.hdu.index_of(files[0].fext[0])
+            files[0].release_all_images()
+
     @property
-    def predefined_catmaps(self):
-        """ Get names of available (pre-defined) column name mappings. """
-        return list(self._PREDEF_CATMAP.keys())
+    def image_extn(self):
+        """ Get image extension number when the image was set using a string
+        file name. When image was set (in py:meth:`set_image`) using a
+        `numpy.ndarray`, this property is `None`.
+
+        """
+        return self._image_ext
 
     def set_default_filters(self):
         """ Set default source selection criteria. """
@@ -95,90 +137,6 @@ class SourceCatalog(object):
             ('flux', '>', 0), ('fwhm', '>', 0), ('radius', '>', 0),
             ('prof-rms-a', '>', 0), ('prof-rms-b', '>', 0)
         ]
-
-    def mark_dirty(self):
-        """ Mark the catalog as "dirty", indicating whether or not sources
-        should be re-extracted from the raw catalog when ``execute()`` is
-        run. Masking and filtering criteria will be applied to the raw catalog
-        during this run of ``execute()``.
-        """
-        self._dirty = True
-
-    def is_dirty(self):
-        """ Returns the "dirty" status.
-        When a catalog is marked as "dirty", sources must be (re-)extracted
-        from the raw catalog. In order to update
-
-        """
-        return self._dirty
-
-    def set_raw_catalog(self, rawcat, catmap=None, origin=0):
-        """
-        Parameters
-        ----------
-        rawcat : astropy.table.Table
-            An :py:class:`~astropy.table.Table` containing source data.
-
-        catmap : dict, str, optional
-            A `dict` that provides mapping (a dictionary) between source's
-            ``'x'``, ``'y'``, ``'flux'``, etc. and the corresponding
-            column names in a :py:class:`~astropy.table.Table` catalog.
-            Instead of a dictionary, this parameter may be a pre-defined
-            mapping name supported by this class. To get the list of
-            all pre-defined catalog mapping supported by this class, use
-            `SourceCatalog`'s `predefined_catmaps` property. When ``catmap``
-            is `None`, no column name mapping will be applied.
-
-        origin: int, float, optional
-            Coordinates of the sources of `SourceCatalog.catalog` are
-            zero-based. The ``origin`` is used for converting ``rawcat``'s
-            coordinates when raw catalog's source coordinates are not
-            zero-based.
-
-        """
-        if rawcat is None:
-            self._rawcat = None
-            self._rawcat_colnames = None
-            self._catalog = None
-            self._mask = None
-            self._mask_type = None
-            self.set_default_filters()
-            self._dirty = False
-            return
-
-        if catmap is None:
-            catmap = {}
-        elif isinstance(catmap, six.string_types):
-            catmap = self._PREDEF_CATMAP[catmap.lower()]
-
-        # make sure we have all required columns before we proceed any further:
-        new_col_names = [catmap.get(k, k) for k in rawcat.colnames]
-        if not all(i in new_col_names for i in self._required_colnames):
-            raise ValueError("Input raw catalog does not include all the "
-                             "required columns.")
-
-        self._rawcat = rawcat.copy()
-        self._dirty = True
-
-        self._origin = origin
-        self._catmap = {}
-
-        if catmap is not None:
-            colnames = rawcat.colnames
-            self._catmap.update(catmap)
-            for k, v in catmap.items():
-                if k in colnames:
-                    self._rawcat.rename_column(k, v)
-
-        # reset mask and filters:
-        self._rawcat_colnames = new_col_names
-        self.mask = None
-        self.set_default_filters()
-
-    @property
-    def rawcat(self):
-        """ Get raw catalog. """
-        return self._rawcat.copy()
 
     @property
     def required_colnames(self):
@@ -190,39 +148,12 @@ class SourceCatalog(object):
         return self._required_colnames[:]
 
     @property
-    def rawcat_colnames(self):
-        """ Get a list of the column names in the raw catalog **after**
-        catalog column name mapping has been applied.
-
-        """
-        return self._rawcat_colnames[:]
-
-    @property
-    def catmap(self):
-        """ Get raw catalog column name mapping. """
-        return {k: v for k, v in self._catmap}
-
-    @property
     def mask_type(self):
         """ Get mask type: 'coords', 'image', or `None` (mask not set). """
         return self._mask_type
 
-    @property
-    def mask(self):
-        """ Get mask indicating "bad" (`True`) and "good" (`False`) sources
-        when ``mask_type`` is ``'image'`` or a 2D array of shape ``(N, 2)``
-        containing integer coordinates of "bad" pixels.
-
-        """
-        return None if self._mask is None else self._mask.copy()
-
-    @mask.setter
-    def mask(self, mask):
-        """
-        Get/Set mask used to ignore (mask) "bad" sources from the raw catalog.
-        Mask is a 2D image-like (but boolean) `numpy.ndarray` indicating
-        "bad" pixels using value `True` (=ignore these pixels) and  "good"
-        pixels using the value `False` (=no need to mask).
+    def set_mask(self, mask):
+        """ Get/Set mask used to ignore (mask) "bad" sources from the catalog.
 
         Parameters
         ----------
@@ -232,8 +163,8 @@ class SourceCatalog(object):
 
             - When ``mask`` is a string, it is assumed to be the name of
               a simple FITS file contaning a boolean mask indicating
-              "bad" pixels using value `True` and  "good" pixels using
-              value `False` (=no need to mask).
+              "bad" pixels using value `True` (=ignore these pixels) and
+              "good" pixels using value `False` (=no need to mask).
 
             - ``mask`` can also be provided directly as a boolean 2D "image"
               in the form of a boolean `numpy.ndarray`.
@@ -245,13 +176,11 @@ class SourceCatalog(object):
 
         """
         if mask is None:
-            if self._mask is not None:
-                self._dirty = True
             self._mask = None
             self._mask_type = None
             return
 
-        elif isinstance(mask, six.string_types):
+        elif isinstance(mask, str):
             # open file and find image extensions:
             files = parse_cs_line(mask, default_ext='*', clobber=False,
                                   fnamesOnly=False, doNotOpenDQ=True,
@@ -310,8 +239,6 @@ class SourceCatalog(object):
             else:
                 raise ValueError("Unsupported mask type or format.")
 
-        self._dirty = True
-
     def set_filters(self, fcond):
         """
         Set conditions for *selecting* sources from the raw catalog.
@@ -357,13 +284,7 @@ class SourceCatalog(object):
             raise TypeError("'fcond' must be a tuple or a list of tuples.")
 
         if self._filters != filters:
-            self._dirty = True
             self._filters = filters
-
-    def reset_filters(self):
-        """ Remove selection filters. """
-        self._dirty = len(self._filters) > 0
-        self._filters = []
 
     def append_filters(self, fcond):
         """
@@ -372,8 +293,6 @@ class SourceCatalog(object):
         description of parameter ``fcond``.
 
         """
-        self._dirty = True
-
         if isinstance(fcond, list):
             for f in fcond:
                 key, op, val = f[:3]
@@ -393,10 +312,13 @@ class SourceCatalog(object):
                 for i in idxs:
                     del self._filters[i]
             self._filters.append((key, op, val))
-            self._dirty = True
 
         else:
             raise TypeError("'fcond' must be a tuple or a list of tuples.")
+
+    def remove_all_filters(self):
+        """ Remove all selection filters. """
+        self._filters = []
 
     @staticmethod
     def _find_filters(filters, key, op=None):
@@ -429,8 +351,6 @@ class SourceCatalog(object):
         for idx in idxs[::-1]:
             del self._filters[idx]
 
-        self._dirty = True
-
     @property
     def filters(self):
         """ Get a list of all active selection filters. """
@@ -441,147 +361,37 @@ class SourceCatalog(object):
         op = ''.join(op.split())
         return cls._CMP_MAP[op]
 
+    @abc.abstractmethod
     def execute(self):
-        """ Compute catalog applying masks and selecting only sources
-        that satisfy all set filters.
+        """ Find sources in the image. Compute catalog applying masks and
+        selecting only sources that satisfy all set filters.
         """
-        if not self._dirty:
-            return
+        pass
 
-        # start with the original "raw" catalog:
-        catalog = self._rawcat.copy()
-
-        # remove sources with masked values:
-        if catalog.masked:
-            mask = np.zeros(len(catalog), dtype=np.bool)
-            for c in catalog.itercols:
-                mask = np.logical_or(mask, c.mask)
-
-            # create a new catalog having only the "good" data without mask:
-            catalog = catalog.__class__(catalog[np.logical_not(mask)],
-                                        masked=False)
-
-        # correct for 'origin':
-        catalog['x'] -= self._origin
-        catalog['y'] -= self._origin
-        xi = py2round(np.asarray(catalog['x'])).astype(np.int)
-        yi = py2round(np.asarray(catalog['y'])).astype(np.int)
-
-        # apply mask:
-        if self._mask is None:
-            mask = np.ones(xi.size, dtype=np.bool)
-
-        elif self._mask_type == 'coords':
-            mask = np.logical_not(
-                [np.any(np.all(np.equal(self._mask, p), axis=1))
-                 for p in np.array([xi, yi]).T]
-            )
-
-        elif self._mask_type == 'image':
-            ymmax, xmmax = self._mask.shape
-            mm = (xi >= 0) & (xi < xmmax) & (yi >= 0) & (yi < ymmax)
-            mask = np.array(
-                [np.logical_not(self._mask[i, j]) if m else False
-                 for m, i, j in zip(mm, yi, xi)]
-            )
-
-        else:
-            raise ValueError("Unexpected value of '_mask_type'. Contact "
-                             "software developer.")
-
-        # apply filters:
-        for f in self._filters:
-            key, op, val = f[:3]
-            if key in catalog.colnames:
-                mask *= self._op2cmp(op)(catalog[key], val)
-
-        catalog = catalog[mask]
-        xi = xi[mask]
-        yi = yi[mask]
-        calc = np.asarray(catalog['flux'])**2 / np.asarray(catalog['fwhm'])
-        Rup = py2round(np.asarray(catalog['radius'])).astype(np.int)
-        Aup = py2round(np.asarray(catalog['prof-rms-a'])).astype(np.int)
-        Rlg = 2 * Rup * Aup
-        xs = xi - Rlg
-        xe = xi + Rlg
-        ys = yi - Rlg
-        ye = yi + Rlg
-
-        catalog['xi'] = xi
-        catalog['yi'] = yi
-        catalog['xs'] = xs
-        catalog['xe'] = xe
-        catalog['ys'] = ys
-        catalog['ye'] = ye
-        catalog['calc'] = calc
-
-        self._catalog = catalog
-        self._dirty = False
-
-    @property
     def catalog(self):
         """ Get catalog (after applying masks and selection filters). """
-        if self._dirty:
-            self.execute()
         return self._catalog
 
+    def get_segmentation_image(self):
+        """ Get segmentation image used to identify catalog's sources. """
+        return None
 
-class SExCatalog(SourceCatalog):
-    """ A catalog class specialized for handling ``SExtractor`` output
-    catalogs, such as being able to load raw ``SExtractor`` catalogs
-    directly from text files.
+    def compute_position_snr(self):
+        if self._catalog is not None:
+            return
+        pos_snr = np.asarray(catalog['flux'])**2 / np.asarray(catalog['fwhm'])
+        self._catalog['pos_snr'] = pos_snr
 
-    Parameters
-    ----------
-    rawcat : astropy.table.Table, str
-        An :py:class:`~astropy.table.Table` containing source data or a
-        ``SExtractor``-generated text file name.
-
-    max_stellarity : float, optional
-        Maximum stellarity for selecting sources from the catalog.
-
-    """
-    def __init__(self, rawcat=None, max_stellarity=1.0):
-        self._max_stellarity = max_stellarity
-        super().__init__()
-        self._origin = 1
-        self.set_raw_catalog(rawcat)
-
-    def set_default_filters(self):
-        """ Sets default filters for selecting sources from the raw catalog.
-
-        Default selection criteria are: ``flux > 0`` AND ``fwhm > 0`` AND
-        ``radius > 0`` AND ``prof-rms-a > 0`` AND ``prof-rms-b > 0`` AND
-        ``stellarity <= max_stellarity``.
-
-        """
-
-        self._filters = [
-            ('flux', '>', 0), ('fwhm', '>', 0), ('radius', '>', 0),
-            ('prof-rms-a', '>', 0), ('prof-rms-b', '>', 0),
-            ('stellarity', '<=', self._max_stellarity)
-        ]
-
-    def set_raw_catalog(self, rawcat):
-        """ Set/replace raw catalog.
-
-        Parameters
-        ----------
-        rawcat : astropy.table.Table, str
-            An :py:class:`~astropy.table.Table` containing source data or a
-            ``SExtractor``-generated text file name.
-
-        """
-        if isinstance(rawcat, six.string_types):
-            rawcat = ascii_io.read(rawcat, guess=False, format='sextractor')
-
-        super().set_raw_catalog(rawcat, catmap='sextractor', origin=1)
+    def set_position_snr(self, pos_snr):
+        if self._catalog is not None:
+            return
+        self._catalog['pos_snr'] = pos_snr
 
 
-class SExImageCatalog(SExCatalog):
-    """ A catalog class specialized for finding sources in images using
-    ``SExtractor`` and then loading raw ``SExtractor`` catalogs
-    directly from output text files.
+class SExImageCatalog(ImageCatalog):
+    """ A catalog class specialized in finding sources using ``SExtractor``
+    and then loading and processing raw ``SExtractor`` catalogs and its output
+    files.
 
     Parameters
     ----------
@@ -592,8 +402,10 @@ class SExImageCatalog(SExCatalog):
         File name of the ``SExtractor`` configuration file to be used for
         finding sources in the ``image``.
 
-    max_stellarity : float, optional
-        Maximum stellarity for selecting sources from the catalog.
+    max_stellarity : float, None, optional
+        Maximum stellarity for selecting sources from the catalog. When
+        ``max_stellarity`` is `None`, source filtering by 'stellarity' is
+        turned off.
 
     sextractor_cmd : str, optional
         Command to invoke ``SExtractor``.
@@ -601,67 +413,176 @@ class SExImageCatalog(SExCatalog):
     """
     def __init__(self, image=None, sexconfig=None, max_stellarity=1.0,
                  sextractor_cmd='sex'):
+        # Check SExtractor command:
+        if not isinstance(sextractor_cmd, str):
+            raise TypeError("SExtractor command must be a string.")
+        sextractor_cmd = sextractor_cmd.strip()
+        if not sextractor_cmd:
+            ValueError("SExtractor command must be a non-empty string.")
+
         self._max_stellarity = max_stellarity
+        super().__init__()
+
+        # self._dirty_image indicates whether SExtractor needs
+        # to be re-run on the image.
+        self._dirty_image = False
+
+        # self._dirty_filters indicates whether selection criteria
+        # need to be re-applied.
+        self._dirty_filters = False
+
         self._sextractor_cmd = sextractor_cmd
+        self._sexconfig = sexconfig
 
-        super().__init__(rawcat=None, max_stellarity=max_stellarity)
+        self._mask = None
+        self._mask_type = None
 
-        self._catname = None
-        self.sexconfig = sexconfig
-        self.image = image
-        # _dirty_img indicates that either image or SExtractor configuration
-        # file (or both) have changed and that a re-extraction of sources
-        # is needed.
-        self._dirty_img = not (image is None or sexconfig is None)
+        self._file_name = None
+        self._tmp_file = None
+        self.set_image(image)
+
+        self._reset_catalogs()
+
+    def set_default_filters(self):
+        """ Sets default filters for selecting sources from the raw catalog.
+
+        Default selection criteria are: ``flux > 0`` AND ``fwhm > 0`` AND
+        ``radius > 0`` AND ``prof-rms-a > 0`` AND ``prof-rms-b > 0`` (AND
+        ``stellarity <= max_stellarity``, if ``max_stellarity`` is not `None`).
+
+        """
+        filters = [
+            ('flux', '>', 0), ('fwhm', '>', 0), ('radius', '>', 0),
+            ('prof-rms-a', '>', 0), ('prof-rms-b', '>', 0)
+        ]
+        if self._max_stellarity is not None:
+            filters.append(('stellarity', '<=', self._max_stellarity))
+
+        self._dirty_filters = SExImageCatalog._filters_changed(
+            filters, self._filters
+        )
+        self._filters = filters
+
+    @staticmethod
+    def _filters_changed(filter1, filter2):
+        # TODO: implement real comparison of filter rules
+        return True
+
+    def _reset_catalogs(self):
+        self._sexcat = None
+        self._catalog = self._empty_catalog()
+        self._dirty_image = self._image is not None
+        self._dirty_filters = (self._dirty_image and
+                               self._sexconfig is not None)
+
+    def _set_sex_catalog(self, sexcat):
+        """ Set/replace raw catalog as extracted from SExtractor's output file.
+
+        Parameters
+        ----------
+        sexcat : str
+            A ``SExtractor``-generated text file name.
+
+        """
+        if isinstance(sexcat, str):
+            sexcat = ascii_io.read(sexcat, guess=False, format='sextractor')
+        else:
+            raise TypeError("Unsupported SExtractor catalog type.")
+
+        catmap = self._PREDEF_CATMAP['sextractor']
+
+        # make sure we have all required columns before we proceed any further:
+        new_col_names = [catmap.get(k, k) for k in sexcat.colnames]
+        if not all(i in new_col_names for i in self._required_colnames):
+            raise ValueError("Input raw catalog does not include all the "
+                             "required columns.")
+
+        self._sexcat = sexcat
+        self._catalog = self._empty_catalog()
+        self._dirty_filters = True
+
+        for k, v in catmap.items():
+            if k in sexcat.colnames:
+                self._sexcat.rename_column(k, v)
 
     def _find_sources(self):
         # returns exit status of the child (i.e., 'sex') process
         # returns None if either image or sexconfig are not set:
-        if self._image is None or self._sexconfig is None:
+        if (not self._dirty_image or self._image is None or
+            self._sexconfig is None):
             return None
 
-        cmd = [self._sextractor_cmd, self.image, '-c', self._sexconfig]
+        # delete output files:
+        catname = SExImageCatalog._get_catname(self._sexconfig)
+        files = SExImageCatalog._get_checkname(self._sexconfig, None)
+        files = [catname] if files is None else [catname] + files
+        for f in files:
+            if os.path.isfile(f):
+                os.remove(f)
+
+        cmd = [self._sextractor_cmd, self._file_name, '-c', self._sexconfig,
+               '-EXT_NUMBER', str(self._image_ext)]
         # popen = subprocess.Popen(cmd, stdout=subprocess.PIPE,
         #                          stderr=subprocess.PIPE)
         # out, err = popen.communicate()
         return subprocess.call(cmd)
 
-    @property
-    def image(self):
-        """ Get image. """
-        return self._image
+    def set_image(self, image):
+        """
+        Set image to be used for source finding.
 
-    @image.setter
-    def image(self, image):
-        """ Set/Get image file name. """
+        Parameters
+        ----------
+        image: numpy.ndarray, str
+            When setting an image either a `numpy.ndarray` of image data or
+            a string file name is acceptable. Image file name may be followed
+            by an extension specification such as ``'file1.fits[1]'`` or
+            ``'file1.fits[(sci,1)]'`` (by default, the first image-like
+            extension will be used).
+
+        """
+        super().set_image(image)
+        self._reset_catalogs()
+        self._file_name = None
+
+        if self._tmp_file is not None:
+            self._tmp_file.close()
+
         if image is None:
-            super().set_raw_catalog(rawcat=None)
-            self._dirty_img = False
+            self._tmp_file = None
             return
 
-        self._image = image
-        self._dirty_img = self.sexconfig is not None
+        if isinstance(self._image, str):
+            self._file_name = self._image
+            self._tmp_file = None
+            return
+
+        if not isinstance(self._image, np.ndarray):
+            raise TypeError("'image' must be either a string file name or "
+                            "a numpy.ndarray.")
+
+        # We've got a numpy.ndarray image. We need to create a temporary file
+        # to be used with SExtractor.
+        self._tmp_file = _create_tmp_fits_file(
+            fits.HDUList([fits.PrimaryHDU(image)]),
+            prefix='tmp_SExImageCatalog_sci_'
+        )
+        self._file_name = self._tmp_file.name
+        self._image_ext = 0
+
+    def set_mask(self, mask):
+        super().set_mask(mask)
+        self._dirty_filters = True
 
     @property
     def sexconfig(self):
-        """ Get ``SExtractor`` configuration file. """
+        """ Set/Get ``SExtractor`` configuration file. """
         return self._sexconfig
 
     @sexconfig.setter
     def sexconfig(self, sexconfig):
-        """ Set/Get ``SExtractor`` configuration file. """
         self._sexconfig = sexconfig
-        if sexconfig is None:
-            super().set_raw_catalog(rawcat=None)
-            self._catname = None
-            self._dirty_img = False
-            self._dirty = False
-        else:
-            # find output catalog file name:
-            self._catname = SExImageCatalog._get_catname(sexconfig)
-            self.set_raw_catalog(self._catname)
-            self._dirty_img = True
-            self._dirty = True
+        self._reset_catalogs()
 
     @staticmethod
     def _get_catname(sexconfig):
@@ -700,6 +621,12 @@ class SExImageCatalog(SExCatalog):
 
     @staticmethod
     def _get_checkname(sexconfig, check_image_type):
+        """
+        When ``check_image_type`` is `None` - return a list of all
+        "check image" file names. Otherwise, return a single file name
+        corresponding to the requested check image type.
+
+        """
         segname = None
         check_types = None
         check_files = None
@@ -738,6 +665,9 @@ class SExImageCatalog(SExCatalog):
         if check_types is None or check_files is None:
             return None
 
+        if check_image_type is None:
+            return check_files
+
         try:
             idx = check_types.index(check_image_type)
         except ValueError:
@@ -745,34 +675,201 @@ class SExImageCatalog(SExCatalog):
 
         return check_files[idx]
 
-    @property
-    def segmentation_file(self):
+    def get_segmentation_image(self):
         """ Get segmentation file name stored in the ``SExtractor``'s
         configuration file or `None`.
 
         """
-        return SExImageCatalog._get_segname(
+        if self._sexconfig is None:
+            return None
+
+        filename = SExImageCatalog._get_checkname(
             self._sexconfig,
             check_image_type='SEGMENTATION'
         )
+        if os.path.isfile(filename):
+            return fits.getdata(filename, ext=0)
+        else:
+            return None
+
+    @property
+    def catalog(self):
+        """ Get catalog (after applying masks and selection filters). """
+        self.execute()
+        return self._catalog
 
     def execute(self):
-        if self._dirty_img:
+        """ Find sources in the image. Compute catalog applying masks and
+        selecting only sources that satisfy all set filters.
+        """
+        if self._dirty_image:
+            if self._file_name is None:
+                # Unable to run SExtractor: No image set.
+                assert(self._image is None)
+                self._dirty_filters = False
+                return
+
+            if self._sexconfig is None:
+                # No SExtractor config file set
+                self._dirty_filters = False
+                return
+
+            self._dirty_filters = True
+
             try:
                 retcode = self._find_sources()
                 if retcode is None:
                     return
+
                 if retcode < 0:
                     print('SExtractor was terminated by signal {:d}'
                           .format(-retcode))
                     return
+
                 elif retcode > 0:
                     print('SExtractor returned {:d}'.format(retcode))
                     return
+
             except OSError as e:
                 print('SExtractor execution failed: {}'.format(e))
                 return
 
-            self._dirty_img = False
+            self._dirty_image = False
 
-        super().execute()
+            self._set_sex_catalog(
+                SExImageCatalog._get_catname(self._sexconfig)
+            )
+
+        if not self._dirty_filters:
+            return
+
+        if self._sexcat is None:
+            # SExtractor catalog has not been set.
+            # Unable to execute source filtering.
+            return
+
+        # start with the original "raw" catalog:
+        catalog = self._sexcat.copy()
+
+        # remove sources with masked values:
+        if catalog.masked:
+            mask = np.zeros(len(catalog), dtype=np.bool)
+            for c in catalog.itercols:
+                mask = np.logical_or(mask, c.mask)
+
+            # create a new catalog having only the "good" data without mask:
+            catalog = catalog.__class__(catalog[np.logical_not(mask)],
+                                        masked=False)
+
+        # correct for 'origin':
+        catalog['x'] -= 1
+        catalog['y'] -= 1
+        xi = py2round(np.asarray(catalog['x'])).astype(np.int)
+        yi = py2round(np.asarray(catalog['y'])).astype(np.int)
+
+        # apply mask:
+        if self._mask is None:
+            mask = np.ones(xi.size, dtype=np.bool)
+
+        elif self._mask_type == 'coords':
+            mask = np.logical_not(
+                [np.any(np.all(np.equal(self._mask, p), axis=1))
+                 for p in np.array([xi, yi]).T]
+            )
+
+        elif self._mask_type == 'image':
+            ymmax, xmmax = self._mask.shape
+            mm = (xi >= 0) & (xi < xmmax) & (yi >= 0) & (yi < ymmax)
+            mask = np.array(
+                [np.logical_not(self._mask[i, j]) if m else False
+                 for m, i, j in zip(mm, yi, xi)]
+            )
+
+        else:
+            raise ValueError("Unexpected value of '_mask_type'. Contact "
+                             "software developer.")
+        # apply filters:
+        for f in self._filters:
+            key, op, val = f[:3]
+            if key in catalog.colnames:
+                mask *= self._op2cmp(op)(catalog[key], val)
+
+        catalog = catalog[mask]
+        xi = xi[mask]
+        yi = yi[mask]
+
+        if 'pos_snr' not in catalog.colnames:
+            catalog['pos_snr'] = (np.asarray(catalog['flux'])**2 /
+                                  np.asarray(catalog['fwhm']))
+
+        # apply mask:
+        mask = mask[mask]
+
+        # apply filters (again) to filter for 'pos_snr' and other columns:
+        for f in self._filters:
+            key, op, val = f[:3]
+            if key in catalog.colnames:
+                mask *= self._op2cmp(op)(catalog[key], val)
+
+        self._catalog = catalog[mask]
+        self._dirty_filters = False
+
+
+    def set_filters(self, fcond):
+        """
+        Set conditions for *selecting* sources from the raw catalog.
+
+        Parameters
+        ----------
+
+        fcond : tuple, list of tuples
+            Each selection condition must be specified as a tuple of the form
+            ``(colname, comp, value)`` where:
+
+            - ``colname`` is a column name from the raw catalog **after**
+              catalog column name mapping has been applied. Use
+              `rawcat_colnames` to get a list of available column names.
+
+            - ``comp`` is a **string** representing a comparison operator.
+              The following operators are suported:
+              ``['>', '>=', '==', '!=', '<', '<=']``.
+
+            - ``value`` is a numeric value to be used for comparison of column
+              values.
+
+            Multiple selection conditions can be provided as a list of the
+            condition tuples described above.
+
+        """
+        old_filters = self._filters[:]
+        super().set_filters(fcond=fcond)
+        self._dirty_filters = SExImageCatalog._filters_changed(
+            self._filters, old_filters
+        )
+
+    def remove_all_filters(self):
+        """ Remove all selection filters. """
+        self._dirty_filters = bool(self._filters)
+        self._filters = []
+
+    def append_filters(self, fcond):
+        """
+        Add one or more conditions for *selecting* sources from the raw
+        catalog to already set filters. See :py:meth:`set_filters` for
+        description of parameter ``fcond``.
+
+        """
+        old_filters = self._filters[:]
+        super().append_filters(fcond=fcond)
+        self._dirty_filters = SExImageCatalog._filters_changed(
+            self._filters, old_filters
+        )
+
+    def remove_filter(self, key, op=None):
+        """
+        """
+        old_filters = self._filters[:]
+        super().remove_filter(key=key, op=op)
+        self._dirty_filters = SExImageCatalog._filters_changed(
+            self._filters, old_filters
+        )
