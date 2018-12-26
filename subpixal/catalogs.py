@@ -683,10 +683,13 @@ class SExImageCatalog(ImageCatalog):
         if self._sexconfig is None:
             return None
 
+        self.execute()
+
         filename = SExImageCatalog._get_checkname(
             self._sexconfig,
             check_image_type='SEGMENTATION'
         )
+
         if os.path.isfile(filename):
             return fits.getdata(filename, ext=0)
         else:

@@ -7,6 +7,8 @@ This module provides utility functions for use by :py:mod:`subpixal` module.
 :License: :doc:`LICENSE`
 
 """
+import tempfile
+
 import numpy as np
 from astropy.io import fits
 

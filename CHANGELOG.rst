@@ -8,6 +8,11 @@ Release Notes
 subpixal (DEVELOPMENT)
 ======================
 
+- Make sure ``execute()`` is called before returning segmentation
+  image data. [#32]
+
+- Add missing import. [#32]
+
 - Setup dependency clean-up. [#31]
 
 - Fix changelog. [#30]
