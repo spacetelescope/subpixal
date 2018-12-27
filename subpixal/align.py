@@ -341,17 +341,17 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
         print("\nThe iterative alignment process has been stopped\n"
               "after reaching maximum number of iterations.")
 
-    fh = open('final_summary.txt', 'w')
+    # print a summary of
+    fh = open('fit_summary.txt', 'a+')
 
-    print("\n===============================================")
-    print("SUMMARY")
-    print("\n===============================================\n")
+    fh.write("\n#################\n##   SUMMARY   ##\n#################\n\n")
+    print("\n#################\n##   SUMMARY   ##\n#################\n")
+
     for imno in range(len(resample.input_image_names)):
         line = "\n-------------------------\nFILE NAME: {}\n\n" \
                .format(resample.input_image_names[imno][0])
         print(line)
         fh.write(line + '\n')
-        fh.flush()
 
         for k, fi in summary:
             (imfile, nmatch, rms, offset, rot, rotxy, scale) = fi[imno]
@@ -361,7 +361,7 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
                     .format(k, nmatch, *rms, *offset, rot, *scale))
             print(line)
             fh.write(line + '\n')
-            fh.flush()
+
     fh.close()
 
     return fit_history
