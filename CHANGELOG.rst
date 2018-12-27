@@ -4,9 +4,12 @@
 Release Notes
 =============
 
+..
+  subpixal (DEVELOPMENT)
+  ======================
 
-subpixal (DEVELOPMENT)
-======================
+subpixal v0.0.3 (27-December-2018)
+==================================
 
 - Make sure ``execute()`` is called before returning segmentation
   image data. [#32]
