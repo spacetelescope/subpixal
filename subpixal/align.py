@@ -61,7 +61,8 @@ def _create_tmp_reference_file(image_file):
 
 def align_images(catalog, resample, wcslin=None, fitgeom='general',
                  nclip=3, sigma=3.0, nmax=10, eps_shift=3e-3,
-                 wcsname='SUBPIXAL', iterative=True, history='last'):
+                 wcsname='SUBPIXAL', wcsupdate='batch',
+                 iterative=False, history='last'):
     """
     Perform *relative* image alignment using sub-pixel cross-correlation.
     Image alignment is performed by adusting each image's WCS so that images
@@ -120,6 +121,15 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
         Label to give newly updated WCS. The default value will set the
         WCS name to `SUBPIXAL`.
 
+    wcsupdate : {'otf', 'batch'}, optional
+        Indicates when to update the WCS of an image: on-the-fly (`'otf'`)
+        setting will update image WCS as soon as the image was aligned while
+        the `'batch'` mode will first compute WCS corrections for all images
+        and *then* will update their WCS at once. With `'otf'` setting,
+        next image (within the same iteration) will be aligned to a drizzled
+        image obtained using (at least some) already aligned
+        (in this iteration) images.
+
     iterative : bool, optional
         If `True`, after each iteration user will be asked whether to
         continue or stop alignment process.
@@ -170,6 +180,18 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
 
     if not isinstance(eps_shift, numbers.Real) or eps_shift <= 0.0:
         raise ValueError("Parameter 'eps_shift' must be a positive number.")
+
+    if not isinstance(wcsupdate, str):
+        raise TypeError("'wcsupdate' must be a string.")
+
+    wcsupdate = wcsupdate.lower().strip()
+    if wcsupdate == 'batch':
+        batch_update = True
+    elif wcsupdate == 'otf':
+        batch_update = False
+    else:
+        raise ValueError("Parameter 'wcsupdate' must be either 'otf' or "
+                         "'batch'.")
 
     nfr = 0  # number of full resamples
     achieved_desired_eps = False
@@ -243,6 +265,9 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
         add_file_name = None
         fit_summary = []
 
+        if batch_update:
+            wcs_update_info = []
+
         for crclean_image, (imfile, exts) in zip(resample.output_crclean,
                                                 resample.input_image_names):
 
@@ -288,7 +313,7 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
             )
 
             fit_summary.append(
-                (imfile, fit['resids'].shape[0], fit['rms'],
+                (imfile, fit['resids'].shape[0], fit['rms'], fit['irms'],
                  fit['offset'], fit['rot'], fit['rotxy'], fit['scale'])
             )
 
@@ -299,15 +324,37 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
 
             shift_corr.append(np.linalg.norm(fit['offset']))
 
-            # update WCS in image headers:
-            with fits.open(imfile, mode='update') as h:
-                for e, _, new_wcs in img_info['wcs_info']:
-                    print("\nUpdating with new WCS:\n{}".format(new_wcs))
-                    update_image_wcs(h, e, new_wcs, wcsname=wcsname)
+            if batch_update:
+                wcs_update_info.append(
+                    (imfile, crclean_image,
+                     [(e, w) for e, _, w in img_info['wcs_info']])
+                )
 
-            with fits.open(crclean_image, mode='update') as h:
-                for e, _, new_wcs in img_info['wcs_info']:
-                    update_image_wcs(h, e, new_wcs, wcsname=wcsname)
+            # update WCS in image headers:
+            if not batch_update:
+                # update image's WCS right away. The new WCS will be used to
+                # generate drizzled image for the next image:
+                with fits.open(imfile, mode='update') as h:
+                    for e, _, new_wcs in img_info['wcs_info']:
+                        print("\nUpdating with new WCS:\n{}".format(new_wcs))
+                        update_image_wcs(h, e, new_wcs, wcsname=wcsname)
+
+                with fits.open(crclean_image, mode='update') as h:
+                    for e, _, new_wcs in img_info['wcs_info']:
+                        update_image_wcs(h, e, new_wcs, wcsname=wcsname)
+
+        # update WCS in image headers:
+        if batch_update:
+            # update WCS of all images all at once:
+            for imfile, crclean_image, wcs_info in wcs_update_info:
+                with fits.open(imfile, mode='update') as h:
+                    for e, new_wcs in wcs_info:
+                        print("\nUpdating with new WCS:\n{}".format(new_wcs))
+                        update_image_wcs(h, e, new_wcs, wcsname=wcsname)
+
+                with fits.open(crclean_image, mode='update') as h:
+                    for e, new_wcs in wcs_info:
+                        update_image_wcs(h, e, new_wcs, wcsname=wcsname)
 
         summary.append((iterno, fit_summary))
 
@@ -354,11 +401,13 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
         fh.write(line + '\n')
 
         for k, fi in summary:
-            (imfile, nmatch, rms, offset, rot, rotxy, scale) = fi[imno]
-            line = ("{:2d}: nmatch={:3d}, xrms={:5.2g}, yrms={:5.2g},  "
-                    "dx={:8.4f}, dy={:8.4f},  rot={:8.5f},  sx={:10.7f}, "
-                    "sy={:10.7f}"
-                    .format(k, nmatch, *rms, *offset, rot, *scale))
+            (imfile, nmatch, rms, irms, offset, rot, rotxy, scale) = fi[imno]
+            line = ("{:2d}: nsrc={:3d}, rms={:5.2g},  irms={:5.2g},  "
+                    "dx={:8.4f}, dy={:8.4f},  rot={:8.5f},  "
+                    "sx-1={:10.3g}, sy-1={:10.3g}"
+                    .format(k, nmatch, np.linalg.norm(rms),
+                            np.linalg.norm(irms), *offset,
+                            rot, scale[0] - 1, scale[1] - 1))
             print(line)
             fh.write(line + '\n')
 
@@ -370,8 +419,6 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
 def _align_1image(resample, image, image_ext, primary_cutouts, seg,
                  image_sky=None, wcslin=None,
                  fitgeom='general', nclip=3, sigma=3.0):
-    # resample.fast_drop_image(image)
-
     img_info = {
         'file_name': image,
         'wcs_info': [],  # a list of: [extension, original WCS, corrected WCS]
@@ -455,7 +502,8 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
         print("<SCALE>: {:.10g}  SCALE_X: {:.10g}  SCALE_Y: {:.10g}"
               .format(fit['scale'][0], fit['scale'][1], fit['scale'][2]))
 
-    print('XRMS: {:.3g}    YRMS: {:.3g}\n'.format(*fit['rms']))
+    print('FIT_RMS: {:.3g}    IMG_RMS: {:.3g}\n'
+          .format(np.linalg.norm(fit['rms']), np.linalg.norm(fit['irms'])))
     nmatch = fit['resids'].shape[0]
     print('Final solution based on {:d} objects.'.format(nmatch))
 
@@ -547,10 +595,10 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
            for distortion in _ASTROPY_WCS_DISTORTIONS):
         raise ValueError("Reference WCS must not have non-linear distortions.")
 
-    xyref = np.empty((len(img_cutouts), 2), dtype=np.float)
-    xy = np.empty_like(xyref)
-    img_dxy = np.empty_like(xyref)
-    ref_dxy = np.empty_like(xyref)
+    xyim = np.empty((len(img_cutouts), 2), dtype=np.float)
+    xyref = np.empty_like(xyim)
+    img_dxy = np.empty_like(xyim)
+    ref_dxy = np.empty_like(xyim)
 
     interlaced_cc = []
     nonshifted_blts = []
@@ -589,30 +637,36 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
 
         interlaced_cc.append(icc)
         nonshifted_blts.append(blt00)
-        img_dxy[k] = [-dx, -dy]
+        img_dxy[k] = [dx, dy]
 
         # convert displacements to reference linear WCS's image coordinates:
         x1, y1 = imct.cutout_src_pos
-        xyref[k] = np.array(wcslin.wcs_world2pix(*imct.pix2world(x1, y1), 0))
+        xyim[k] = np.array(wcslin.wcs_world2pix(*imct.pix2world(x1, y1), 1))
 
-        x2 = x1 - dx
-        y2 = y1 - dy
-        xy[k] = np.array(wcslin.wcs_world2pix(*imct.pix2world(x2, y2), 0))
+        x2 = x1 + dx
+        y2 = y1 + dy
+        xyref[k] = np.array(wcslin.wcs_world2pix(*imct.pix2world(x2, y2), 1))
 
-        ref_dxy[k] = xy[k] - xyref[k]
+        ref_dxy[k] = xyim[k] - xyref[k]
 
     # find linear transformation:
+    xyindx = np.arange(len(xyim))
     fit = linearfit.iter_fit_all(
-        xy, xyref, xyindx=np.arange(len(xy)), uvindx=np.arange(len(xy)),
+        xyim, xyref, xyindx=xyindx, uvindx=xyindx.copy(),
         mode=fitgeom, center=np.array(wcslin.wcs.crpix),
         nclip=nclip, sigma=sigma, verbose=False
     )
 
-    #TODO: possibly compute fit RMS in the *image* coordinate system
-    #      (using input image's pixel scale).
-
     fit['subpixal_img_dxy'] = img_dxy
     fit['subpixal_ref_dxy'] = ref_dxy
+
+    #TODO: lines below may need to be removed once linearfit in drizzlepac
+    #      is fixed not to modify input arguments.
+    fit['img_coords'] += wcslin.wcs.crpix
+    fit['ref_coords'] += wcslin.wcs.crpix
+
+    # Compute fit RMS in the *image* coordinate system:
+    fit['irms'] = np.sqrt(np.mean(img_dxy[fit['img_indx']]**2, axis=0))
 
     return fit, interlaced_cc, nonshifted_blts
 
