@@ -35,6 +35,22 @@ def _is_int(n):
     )
 
 
+def _select_high(values, nrows):
+    idx = [i for i, _ in sorted(enumerate(values), key=lambda v: v[1])]
+    idx = idx[-nrows:] if nrows >= 0 else idx[:-nrows]
+    mask = np.zeros(len(values), dtype=np.bool_)
+    mask[idx] = True
+    return mask
+
+
+def _select_lower(values, nrows):
+    idx = [i for i, _ in sorted(enumerate(values), key=lambda v: v[1])]
+    idx = idx[:nrows] if nrows >= 0 else idx[nrows:]
+    mask = np.zeros(len(values), dtype=np.bool_)
+    mask[idx] = True
+    return mask
+
+
 class ImageCatalog(abc.ABC):
     """
     A class for finding sources in images and handling catalog data: storing,
@@ -47,7 +63,9 @@ class ImageCatalog(abc.ABC):
         '==': np.equal,
         '!=': np.not_equal,
         '<': np.less,
-        '<=': np.less_equal
+        '<=': np.less_equal,
+        'h': _select_high,
+        'l': _select_lower,
     }
 
     # NOTE: Keep all predefined catalog keys ("catalog type", e.g.,
@@ -248,18 +266,24 @@ class ImageCatalog(abc.ABC):
 
         fcond : tuple, list of tuples
             Each selection condition must be specified as a tuple of the form
-            ``(colname, comp, value)`` where:
+            ``(colname, cond, value)`` OR ``(colname, nrows)`` where:
 
             - ``colname`` is a column name from the raw catalog **after**
               catalog column name mapping has been applied. Use
               `rawcat_colnames` to get a list of available column names.
 
-            - ``comp`` is a **string** representing a comparison operator.
-              The following operators are suported:
-              ``['>', '>=', '==', '!=', '<', '<=']``.
+            - ``cond`` is a **string** representing a selection condition,
+              i.e., a comparison operator. The following operators are
+              suported: ``['>', '>=', '==', '!=', '<', '<=', 'h', 'l']``. The
+              ``'h'`` or ``'l'`` operators are used to select a specific
+              number of rows (specified by the ``value``) that have highest
+              or lowest values in the column specified by ``colname``.
+              Selection of highest/lowest values is performed last, after all
+              other comparison-based filters have been applied.
 
             - ``value`` is a numeric value to be used for comparison of column
-              values.
+              values. When ``cond`` is either ``'h'`` or ``'l'``, this value
+              must be a *positive integer* number of rows to be .
 
             Multiple selection conditions can be provided as a list of the
             condition tuples described above.
@@ -794,6 +818,9 @@ class SExImageCatalog(ImageCatalog):
         # apply filters:
         for f in self._filters:
             key, op, val = f[:3]
+            if op in ['h', 'l']:
+                # apply these last:
+                continue
             if key in catalog.colnames:
                 mask *= self._op2cmp(op)(catalog[key], val)
 
@@ -811,6 +838,20 @@ class SExImageCatalog(ImageCatalog):
         # apply filters (again) to filter for 'pos_snr' and other columns:
         for f in self._filters:
             key, op, val = f[:3]
+            if op in ['h', 'l']:
+                # apply these last:
+                continue
+            if key in catalog.colnames:
+                mask *= self._op2cmp(op)(catalog[key], val)
+
+        # At last, apply top/bottom selection (if any):
+        catalog = catalog[mask]
+        mask = np.ones(len(catalog), dtype=np.bool)
+        for f in self._filters:
+            key, op, val = f[:3]
+            if op not in ['h', 'l']:
+                # skip this as it was already applied
+                continue
             if key in catalog.colnames:
                 mask *= self._op2cmp(op)(catalog[key], val)
 
@@ -827,18 +868,24 @@ class SExImageCatalog(ImageCatalog):
 
         fcond : tuple, list of tuples
             Each selection condition must be specified as a tuple of the form
-            ``(colname, comp, value)`` where:
+            ``(colname, cond, value)`` OR ``(colname, nrows)`` where:
 
             - ``colname`` is a column name from the raw catalog **after**
               catalog column name mapping has been applied. Use
               `rawcat_colnames` to get a list of available column names.
 
-            - ``comp`` is a **string** representing a comparison operator.
-              The following operators are suported:
-              ``['>', '>=', '==', '!=', '<', '<=']``.
+            - ``cond`` is a **string** representing a selection condition,
+              i.e., a comparison operator. The following operators are
+              suported: ``['>', '>=', '==', '!=', '<', '<=', 'h', 'l']``. The
+              ``'h'`` or ``'l'`` operators are used to select a specific
+              number of rows (specified by the ``value``) that have highest
+              or lowest values in the column specified by ``colname``.
+              Selection of highest/lowest values is performed last, after all
+              other comparison-based filters have been applied.
 
             - ``value`` is a numeric value to be used for comparison of column
-              values.
+              values. When ``cond`` is either ``'h'`` or ``'l'``, this value
+              must be a *positive integer* number of rows to be .
 
             Multiple selection conditions can be provided as a list of the
             condition tuples described above.

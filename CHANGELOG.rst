@@ -5,13 +5,18 @@ Release Notes
 =============
 
 
-subpixal (DEVELOPMENT)
-======================
+.. subpixal (DEVELOPMENT)
+   ======================
 
-This PR addresses several issues:
 
-- [Bug]The direction of the displacement as well as the direction of the fit
-  were reversed. [#36]
+subpixal v0.0.4 (03-January-2019)
+==================================
+
+- Added support for keeping top/bottom number of sources according to
+  values in a specified catalog's column. [#37]
+
+- The direction of the displacement as well as the direction of the fit
+  have been reversed (bug fix). [#36]
 
 - Instead of reporting `XRMS` and `YRMS` (rms of the fit in the tangent plane;
   i.e., the RMS displacement of the image source positions wrt.
@@ -25,6 +30,7 @@ This PR addresses several issues:
   be used by next images) or wait until the end of the iteration and update
   all images at once. [#36]
 
+
 subpixal v0.0.3 (27-December-2018)
 ==================================
 
@@ -37,10 +43,12 @@ subpixal v0.0.3 (27-December-2018)
 
 - Fix changelog. [#30]
 
+
 subpixal v0.0.2 (23-December-2018)
 ==================================
 
 - Initial fully operational release. [#29]
+
 
 subpixal v0.0.1 (10-April-2018)
 ==================================
