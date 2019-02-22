@@ -56,7 +56,10 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
     catalog : ImageCatalog, astropy.table.Table
         A table of sources which need to be extracted. ``catalog`` must contain
         a column named ``'id'`` which contains IDs of segments from the
-        ``segmentation_image``.
+        ``segmentation_image``. If ``catalog`` is an `astropy.table.Table`,
+        then it's ``meta`` attribute may contain an optional
+        ``'weight_colname'`` item indicating which column in the table shows
+        source weight. If not provided, unweighted fitting will be performed.
 
     segmentation_image: numpy.ndarray
         A 2D segmentation image identifying sources from the catalog
@@ -140,6 +143,10 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
     )
 
     segments = []
+    if 'weight' in catalog.colnames:
+        src_weights = catalog['weight']
+    else:
+        src_weights = None
 
     for sid, sidx in zip(ids, cat_indices):
         # find indices of pixels having a 'sid' ID:
@@ -168,9 +175,14 @@ def create_primary_cutouts(catalog, segmentation_image, imdata, imwcs,
         y2 += pad
 
         src_pos = (catalog['x'][sidx], catalog['y'][sidx])
+        if src_weights is None:
+            src_weight = None
+        else:
+            src_weight = src_weights[sidx]
 
         cutout = Cutout(imdata, imwcs, blc=(x1, y1), trc=(x2, y2),
-                        src_pos=src_pos, dq=imdq, weight=imweight, src_id=sid,
+                        src_pos=src_pos, src_weight=src_weight,
+                        dq=imdq, weight=imweight, src_id=sid,
                         data_units=data_units, exptime=exptime, fillval=0)
 
         cutout.mask |= np.logical_not(mask[cutout.extraction_slice])
@@ -267,8 +279,9 @@ def create_input_image_cutouts(primary_cutouts, imdata, imwcs, imdq=None,
 
         try:
             imct = Cutout(imdata, imwcs, blc=(x1, y1), trc=(x2, y2),
-                          dq=imdq, weight=imweight, src_id=ct.src_id,
-                          data_units=data_units, exptime=exptime, fillval=0)
+                          src_weight=ct.src_weight, dq=imdq, weight=imweight,
+                          src_id=ct.src_id, data_units=data_units,
+                          exptime=exptime, fillval=0)
 
             if imdq is not None:
                 imct.mask |= bitfield_to_boolean_mask(
@@ -385,9 +398,9 @@ def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
         # the image's data array:
         try:
             imct = Cutout(imdata, imwcs, blc=(x1, y1), trc=(x2, y2),
-                          dq=imdq, weight=imweight, src_id=ct.src_id,
-                          data_units=data_units, exptime=exptime, mode='fill',
-                          fillval=0)
+                          src_weight=ct.src_weight, dq=imdq, weight=imweight,
+                          src_id=ct.src_id, data_units=data_units,
+                          exptime=exptime, mode='fill', fillval=0)
 
         except NoOverlapError:
             continue
@@ -603,6 +616,10 @@ class Cutout(object):
            most likely will need to be revised to obtain better estimates
            for the position of the source in the cutout.
 
+    src_weight : float, None, optional
+        The weight of the source in the cutout to be used in alignment when
+        fitting geometric transformations.
+
     dq: numpy.ndarray
         Data quality array associated with image data. If provided, this
         array will be cropped the same way as image data and stored within
@@ -655,10 +672,8 @@ class Cutout(object):
     DEFAULT_QUIET = True
 
     def __init__(self, data, wcs, blc=(0, 0), trc=None,
-                 src_pos=None, dq=None, weight=None, src_id=0,
-                 data_units='rate', exptime=1, mode='strict',
-                 fillval=np.nan):
-
+                 src_pos=None, src_weight=None, dq=None, weight=None, src_id=0,
+                 data_units='rate', exptime=1, mode='strict', fillval=np.nan):
         if trc is None and data is None:
             raise ValueError("'trc' cannot be None when 'data' is None.")
 
@@ -701,6 +716,7 @@ class Cutout(object):
         self._blc = (blc[0], blc[1])
         self._trc = (trc[0], trc[1])
         self.src_pos = src_pos
+        self.src_weight = src_weight
 
         # create data and mask arrays:
         cutout_data = np.full((self.height, self.width), fill_value=fillval,
@@ -779,6 +795,18 @@ class Cutout(object):
             self._src_pos = (0.5 * (x1 + x2), 0.5 * (y1 + y2))
         else:
             self._src_pos = tuple(src_pos)[:2]
+
+    @property
+    def src_weight(self):
+        """ Get/set source's weight for fitting geometric transformations. """
+        return self._src_weight
+
+    @src_weight.setter
+    def src_weight(self, src_weight):
+        if src_weight is not None and np.any(src_weight < 0.0):
+            raise ValueError("Source weight must be a non-negative number "
+                             "or None.")
+        self._src_weight = src_weight
 
     @property
     def cutout_src_pos(self):

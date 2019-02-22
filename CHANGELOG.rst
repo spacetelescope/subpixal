@@ -5,12 +5,20 @@ Release Notes
 =============
 
 
-.. subpixal (DEVELOPMENT)
-   ======================
+.. subpixal (unreleased)
+   =====================
 
 
-subpixal v0.0.4 (03-January-2019)
-==================================
+0.0.5 (22-February-2019)
+========================
+
+- Added support for weighted fitting. Added parameter ``'use_weights'``
+  that can be used to enable/disable weighted fitting when input catalogs
+  have a column called ``'weight'``. [#38]
+
+
+0.0.4 (03-January-2019)
+=======================
 
 - Added support for keeping top/bottom number of sources according to
   values in a specified catalog's column. [#37]
@@ -18,21 +26,21 @@ subpixal v0.0.4 (03-January-2019)
 - The direction of the displacement as well as the direction of the fit
   have been reversed (bug fix). [#36]
 
-- Instead of reporting `XRMS` and `YRMS` (rms of the fit in the tangent plane;
-  i.e., the RMS displacement of the image source positions wrt.
-  reference source positions, now the code will report total RMS `FIT_RMS`
-  computed as `sqrt(XRMS**2+YRM**2)` and `IMG_RMS` (equivalent of `FIT_RMS`
+- Instead of reporting ``XRMS`` and ``YRMS`` (rms of the fit in the tangent
+  plane; i.e., the RMS displacement of the image source positions wrt.
+  reference source positions, now the code will report total RMS ``FIT_RMS``
+  computed as ``sqrt(XRMS**2+YRM**2)`` and `IMG_RMS` (equivalent of ``FIT_RMS``
   but computed in input image pixels - hence the problem with this measure
   for images affected by distortion). [#36]
 
-- Added a parameter (`wcsupdate`) that allows a choice of when to update image
-  headers with an aligned WCS: as soon as an image is fit (and then it can
-  be used by next images) or wait until the end of the iteration and update
+- Added a parameter (``wcsupdate``) that allows a choice of when to update
+  image headers with an aligned WCS: as soon as an image is fit (and then it
+  can be used by next images) or wait until the end of the iteration and update
   all images at once. [#36]
 
 
-subpixal v0.0.3 (27-December-2018)
-==================================
+0.0.3 (27-December-2018)
+========================
 
 - Make sure ``execute()`` is called before returning segmentation
   image data. [#32]
@@ -44,13 +52,13 @@ subpixal v0.0.3 (27-December-2018)
 - Fix changelog. [#30]
 
 
-subpixal v0.0.2 (23-December-2018)
-==================================
+0.0.2 (23-December-2018)
+========================
 
 - Initial fully operational release. [#29]
 
 
-subpixal v0.0.1 (10-April-2018)
-==================================
+0.0.1 (10-April-2018)
+=====================
 
 - Initial release. [#1]

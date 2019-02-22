@@ -17,7 +17,8 @@ from astropy.io import fits
 from astropy import wcs
 from stwcs.wcsutil import HSTWCS
 
-from drizzlepac import linearfit, updatehdr
+from drizzlepac import updatehdr
+from tweakwcs import linearfit
 
 from . import cutout
 from .blot import blot_cutout
@@ -60,7 +61,7 @@ def _create_tmp_reference_file(image_file):
 
 
 def align_images(catalog, resample, wcslin=None, fitgeom='general',
-                 nclip=3, sigma=3.0, nmax=10, eps_shift=3e-3,
+                 nclip=3, sigma=3.0, nmax=10, eps_shift=3e-3, use_weights=True,
                  wcsname='SUBPIXAL', wcsupdate='batch',
                  iterative=False, history='last'):
     """
@@ -116,6 +117,10 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
     eps_shift : float, optional
         The algorithm will stop iterations when found shifts are below
         ``eps_shift`` value for all images.
+
+    use_weights : bool, optional
+        Indicates whether to perform a weighted fit when catalog contains
+        a ``'weights'`` column.
 
     wcsname : str, None, optional
         Label to give newly updated WCS. The default value will set the
@@ -309,12 +314,14 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
                 seg=seg,
                 nclip=nclip,
                 sigma=sigma,
-                fitgeom=fitgeom
+                fitgeom=fitgeom,
+                use_weights=use_weights
             )
 
             fit_summary.append(
-                (imfile, fit['resids'].shape[0], fit['rms'], fit['irms'],
-                 fit['offset'], fit['rot'], fit['rotxy'], fit['scale'])
+                (imfile, fit['resids'].shape[0], fit['rmse'], fit['mae'],
+                 fit['irmse'], fit['offset'], fit['rot'], fit['rotxy'],
+                 fit['scale'])
             )
 
             if history:
@@ -401,12 +408,12 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
         fh.write(line + '\n')
 
         for k, fi in summary:
-            (imfile, nmatch, rms, irms, offset, rot, rotxy, scale) = fi[imno]
-            line = ("{:2d}: nsrc={:3d}, rms={:5.2g},  irms={:5.2g},  "
-                    "dx={:8.4f}, dy={:8.4f},  rot={:8.5f},  "
+            (imfile, nmatch, rmse, mae, irmse, offset,
+             rot, rotxy, scale) = fi[imno]
+            line = ("{:2d}: nsrc={:3d},  rmse={:5.2g}, mae={:5.2g}, "
+                    "irmse={:5.2g},  dx={:8.4f}, dy={:8.4f},  rot={:8.5f},  "
                     "sx-1={:10.3g}, sy-1={:10.3g}"
-                    .format(k, nmatch, np.linalg.norm(rms),
-                            np.linalg.norm(irms), *offset,
+                    .format(k, nmatch, rmse, mae, irmse, offset[0], offset[1],
                             rot, scale[0] - 1, scale[1] - 1))
             print(line)
             fh.write(line + '\n')
@@ -418,7 +425,7 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
 
 def _align_1image(resample, image, image_ext, primary_cutouts, seg,
                  image_sky=None, wcslin=None,
-                 fitgeom='general', nclip=3, sigma=3.0):
+                 fitgeom='general', nclip=3, sigma=3.0, use_weights=True):
     img_info = {
         'file_name': image,
         'wcs_info': [],  # a list of: [extension, original WCS, corrected WCS]
@@ -473,7 +480,8 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
         wcslin=wcslin,
         fitgeom=fitgeom,
         nclip=nclip,
-        sigma=sigma
+        sigma=sigma,
+        use_weights=use_weights
     )
 
     img_info['blotted_cutouts'].extend(nonshifted_blts)
@@ -502,14 +510,14 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
         print("<SCALE>: {:.10g}  SCALE_X: {:.10g}  SCALE_Y: {:.10g}"
               .format(fit['scale'][0], fit['scale'][1], fit['scale'][2]))
 
-    print('FIT_RMS: {:.3g}    IMG_RMS: {:.3g}\n'
-          .format(np.linalg.norm(fit['rms']), np.linalg.norm(fit['irms'])))
+    print('FIT RMSE: {:.3g}    FIT MAE: {:.3g}    IMAGE FIT RMSE: {:.3g}\n'
+          .format(fit['rmse'], fit['mae'], fit['irmse']))
     nmatch = fit['resids'].shape[0]
     print('Final solution based on {:d} objects.'.format(nmatch))
 
     # correct WCS:
     for ext, owcs, wcs in img_info['wcs_info']:
-        correct_wcs(imwcs=wcs, wcslin=drz_wcs, rotmat=fit['fit_matrix'],
+        correct_wcs(imwcs=wcs, wcslin=drz_wcs, rotmat=fit['matrix'],
                     shifts=fit['offset'], fitgeom=fitgeom)
 
         print("\n------- ORIGINAL WCS for '{:s}[{}]': ------"
@@ -524,7 +532,7 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
 
 
 def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
-                    nclip=3, sigma=3.0):
+                    nclip=3, sigma=3.0, use_weights=True):
     """
     Perform linear fit to diplacements (found using cross-correlation) between
     ``img_cutouts`` and "blot" of ``drz_cutouts`` onto ``img_cutouts``.
@@ -556,6 +564,10 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
 
     sigma : float, optional
         Clipping limit in sigma units.
+
+    use_weights : bool, optional
+        Indicates whether to perform a weighted fit when all input
+        ``drz_cutouts.src_weight`` are not `None`.
 
     Returns
     -------
@@ -595,7 +607,8 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
            for distortion in _ASTROPY_WCS_DISTORTIONS):
         raise ValueError("Reference WCS must not have non-linear distortions.")
 
-    xyim = np.empty((len(img_cutouts), 2), dtype=np.float)
+    npts = len(img_cutouts)
+    xyim = np.empty((npts, 2), dtype=np.float)
     xyref = np.empty_like(xyim)
     img_dxy = np.empty_like(xyim)
     ref_dxy = np.empty_like(xyim)
@@ -649,24 +662,36 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
 
         ref_dxy[k] = xyim[k] - xyref[k]
 
+    # create a list of weights (if available). We do this only for the
+    # cutouts from drizzled image because image cutouts have identical weights.
+    if use_weights:
+        weights = [ct.src_weight for ct in drz_cutouts]
+        if all(w is None for w in weights):
+            weights = None
+        elif any(w is None for w in weights):
+            raise ValueError("Not all cutouts have weights set. All cutouts "
+                             "must either have non-negative weights or be "
+                             "None.")
+        elif any(w < 0 for w in weights):
+            raise ValueError("Weights must be non-negative.")
+        else:
+            weights = np.asarray(weights)
+
+    else:
+        weights = None
+
     # find linear transformation:
-    xyindx = np.arange(len(xyim))
-    fit = linearfit.iter_fit_all(
-        xyim, xyref, xyindx=xyindx, uvindx=xyindx.copy(),
-        mode=fitgeom, center=np.array(wcslin.wcs.crpix),
-        nclip=nclip, sigma=sigma, verbose=False
+    fit = linearfit.iter_linear_fit(
+        xyim, xyref, wxy=None, wuv=weights,
+        fitgeom=fitgeom, center=np.array(wcslin.wcs.crpix),
+        nclip=nclip, sigma=sigma
     )
 
     fit['subpixal_img_dxy'] = img_dxy
     fit['subpixal_ref_dxy'] = ref_dxy
 
-    #TODO: lines below may need to be removed once linearfit in drizzlepac
-    #      is fixed not to modify input arguments.
-    fit['img_coords'] += wcslin.wcs.crpix
-    fit['ref_coords'] += wcslin.wcs.crpix
-
-    # Compute fit RMS in the *image* coordinate system:
-    fit['irms'] = np.sqrt(np.mean(img_dxy[fit['img_indx']]**2, axis=0))
+    # Compute fit RMSE in the *image* coordinate system:
+    fit['irmse'] = np.sqrt(2 * np.mean(img_dxy[fit['fitmask']]**2))
 
     return fit, interlaced_cc, nonshifted_blts
 

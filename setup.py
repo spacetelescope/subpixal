@@ -102,13 +102,14 @@ PACKAGE_DATA = {
 }
 
 INSTALL_REQUIRES=[
-    'numpy',
+    'numpy>=1.15',
     'scipy',
     'astropy>=3.1',
     'stsci.tools',
     'stsci.skypac',
     'stwcs',
     'drizzlepac>=2.2.6',
+    'tweakwcs>=0.4.2'
 ]
 
 

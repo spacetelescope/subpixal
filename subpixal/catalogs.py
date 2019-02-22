@@ -28,6 +28,8 @@ from . utils import py2round, _create_tmp_fits_file
 __all__ = ['ImageCatalog', 'SExImageCatalog']
 
 
+_FWHM2SIGMA = 2 * np.sqrt(2.0 * np.log(2.0))
+
 def _is_int(n):
     return (
         (isinstance(n, int) and not isinstance(n, bool)) or
@@ -75,10 +77,10 @@ class ImageCatalog(abc.ABC):
             'NUMBER':'id',
             'X_IMAGE': 'x',
             'Y_IMAGE': 'y',
-            'FLUX_PETRO': 'flux',
-            'PETRO_RADIUS': 'radius',
-            'A_IMAGE': 'prof-rms-a',
-            'B_IMAGE': 'prof-rms-b',
+            'FLUX_ISO': 'flux',
+            'FLUXERR_ISO': 'fluxerr',
+            'A_IMAGE': 'semi-major-a',
+            'B_IMAGE': 'semi-major-b',
             'FWHM_IMAGE': 'fwhm',
             'CLASS_STAR': 'stellarity'
         }
@@ -87,10 +89,10 @@ class ImageCatalog(abc.ABC):
     def __init__(self):
         self._filters = []
         self._required_colnames = [
-            'id', 'x', 'y', 'flux', 'radius', 'prof-rms-a', 'prof-rms-b',
+            'id', 'x', 'y', 'flux', 'fluxerr', 'semi-major-a', 'semi-major-b',
             'stellarity', 'fwhm'
         ]
-        self._derived_colnames = ['pos_snr']
+        self._derived_colnames = ['pos_std', 'weight']
         self.set_default_filters()
 
         self._image = None
@@ -152,8 +154,8 @@ class ImageCatalog(abc.ABC):
     def set_default_filters(self):
         """ Set default source selection criteria. """
         self._filters = [
-            ('flux', '>', 0), ('fwhm', '>', 0), ('radius', '>', 0),
-            ('prof-rms-a', '>', 0), ('prof-rms-b', '>', 0)
+            ('flux', '>', 0), ('fwhm', '>', 0),
+            ('semi-major-a', '>', 0), ('semi-major-b', '>', 0)
         ]
 
     @property
@@ -400,16 +402,51 @@ class ImageCatalog(abc.ABC):
         """ Get segmentation image used to identify catalog's sources. """
         return None
 
-    def compute_position_snr(self):
-        if self._catalog is not None:
-            return
-        pos_snr = np.asarray(catalog['flux'])**2 / np.asarray(catalog['fwhm'])
-        self._catalog['pos_snr'] = pos_snr
+    def compute_position_std(self, catalog):
+        """ This function is called to compute source position error estimate.
+        This function uses the following simplified estimate:
+        :math:`\sigma_{\mathrm{pos}}=\sigma_{\mathrm{Gaussian}} / \mathrm{SNR}=\mathrm{FWHM}/(2\sqrt{2 \ln 2}\mathrm{SNR})`.
+        Sub-classes can implement more accurate position error computation.
 
-    def set_position_snr(self, pos_snr):
-        if self._catalog is not None:
-            return
-        self._catalog['pos_snr'] = pos_snr
+        Parameters
+        ----------
+        catalog : astropy.table.Table
+            A table containing `~ImageCatalog.required_colnames` columns.
+
+        Returns
+        -------
+        pos_std : numpy.ndarray
+            Position error computed from input catalog data.
+
+        """
+        if self._catalog is None:
+            return None
+        pos_std = np.asarray(
+            catalog['fwhm'] / (_FWHM2SIGMA * catalog['flux'] /
+                               catalog['fluxerr'])
+        )
+        return pos_std
+
+    def compute_weights(self, catalog):
+        """ This function is called to compute source weights in a catalog.
+        Currently, all weights are set equal to 1. Sub-classes should implement
+        more meaningful weight computation.
+
+        Parameters
+        ----------
+        catalog : astropy.table.Table
+            A table containing `~ImageCatalog.required_colnames` columns.
+
+        Returns
+        -------
+        weights : numpy.ndarray
+            Weights computed from input catalog data.
+
+        """
+        if self._catalog is None:
+            return None
+        weights = np.ones(len(self._catalog), dtype=np.float)
+        return weights
 
 
 class SExImageCatalog(ImageCatalog):
@@ -471,13 +508,13 @@ class SExImageCatalog(ImageCatalog):
         """ Sets default filters for selecting sources from the raw catalog.
 
         Default selection criteria are: ``flux > 0`` AND ``fwhm > 0`` AND
-        ``radius > 0`` AND ``prof-rms-a > 0`` AND ``prof-rms-b > 0`` (AND
+        ``semi-major-a > 0`` AND ``semi-major-b > 0`` (AND
         ``stellarity <= max_stellarity``, if ``max_stellarity`` is not `None`).
 
         """
         filters = [
-            ('flux', '>', 0), ('fwhm', '>', 0), ('radius', '>', 0),
-            ('prof-rms-a', '>', 0), ('prof-rms-b', '>', 0)
+            ('flux', '>', 0), ('fwhm', '>', 0),
+            ('semi-major-a', '>', 0), ('semi-major-b', '>', 0)
         ]
         if self._max_stellarity is not None:
             filters.append(('stellarity', '<=', self._max_stellarity))
@@ -828,14 +865,19 @@ class SExImageCatalog(ImageCatalog):
         xi = xi[mask]
         yi = yi[mask]
 
-        if 'pos_snr' not in catalog.colnames:
-            catalog['pos_snr'] = (np.asarray(catalog['flux'])**2 /
-                                  np.asarray(catalog['fwhm']))
+        # compute "derived" quantities:
+        pos_std = self.compute_position_std(catalog)
+        if pos_std is not None:
+            catalog['pos_std'] = pos_std
+
+        weights = self.compute_weights(catalog)
+        if weights is not None:
+            catalog['weight'] = weights
 
         # apply mask:
         mask = mask[mask]
 
-        # apply filters (again) to filter for 'pos_snr' and other columns:
+        # apply filters (again) to filter for 'pos_std' and other columns:
         for f in self._filters:
             key, op, val = f[:3]
             if op in ['h', 'l']:
@@ -923,3 +965,24 @@ class SExImageCatalog(ImageCatalog):
         self._dirty_filters = SExImageCatalog._filters_changed(
             self._filters, old_filters
         )
+
+    def compute_weights(self, catalog):
+        """ This function is called to compute source weights in a catalog.
+        This function estimates weights as :math:`1/\sigma_{\mathrm{pos}}`.
+
+        Parameters
+        ----------
+        catalog : astropy.table.Table
+            A table containing `~ImageCatalog.required_colnames` columns.
+
+        Returns
+        -------
+        weights : astropy.table.Column
+            Weights computed from input catalog data.
+
+        """
+        pos_std = self.compute_position_std(catalog)
+        if pos_std is None:
+            return None
+        weights = 1.0 / pos_std**2
+        return weights
