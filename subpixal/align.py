@@ -691,7 +691,20 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
     fit['subpixal_ref_dxy'] = ref_dxy
 
     # Compute fit RMSE in the *image* coordinate system:
-    fit['irmse'] = np.sqrt(2 * np.mean(img_dxy[fit['fitmask']]**2))
+    if weights is None:
+        fit['irmse'] = np.sqrt(2 * np.mean(img_dxy[fit['fitmask']]**2))
+
+    else:
+        npts = len(weights)
+        wt = np.sum(weights)
+        if npts == 0 or wt == 0.0:
+            fit['irmse'] = float('nan')
+        else:
+            w = weights / wt
+            fit['irmse'] = float(
+                np.sqrt(np.sum(np.dot(w[fit['fitmask']],
+                                      img_dxy[fit['fitmask']]**2)))
+            )
 
     return fit, interlaced_cc, nonshifted_blts
 

@@ -9,6 +9,13 @@ Release Notes
    =====================
 
 
+0.0.6.dev (22-February-2019)
+============================
+
+- Modified the formula for computing ``RMSE`` of the fit in *image pixels*
+  to take into account weights when available. [#39]
+
+
 0.0.5 (22-February-2019)
 ========================
 
@@ -29,9 +36,9 @@ Release Notes
 - Instead of reporting ``XRMS`` and ``YRMS`` (rms of the fit in the tangent
   plane; i.e., the RMS displacement of the image source positions wrt.
   reference source positions, now the code will report total RMS ``FIT_RMS``
-  computed as ``sqrt(XRMS**2+YRM**2)`` and `IMG_RMS` (equivalent of ``FIT_RMS``
-  but computed in input image pixels - hence the problem with this measure
-  for images affected by distortion). [#36]
+  computed as ``sqrt(XRMS**2+YRMS**2)`` and `IMG_RMS` (equivalent of
+  ``FIT_RMS`` but computed in input image pixels - hence the problem with this
+  measure for images affected by distortion). [#36]
 
 - Added a parameter (``wcsupdate``) that allows a choice of when to update
   image headers with an aligned WCS: as soon as an image is fit (and then it
