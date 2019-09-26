@@ -457,7 +457,7 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
             img_units = hdulist[ext].header['BUNIT']
             img_units = 'rate' if '/' in img_units else 'counts'
 
-            if image_sky is not None:
+            if image_sky is not None and image_sky[ext] is not None:
                 img_sci -= image_sky[ext]
 
             imgct_ext, drzct_ext = cutout.create_cutouts(

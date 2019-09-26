@@ -9,8 +9,11 @@ Release Notes
    =====================
 
 
-0.0.6.dev (22-February-2019)
-============================
+0.0.6.dev (26-September-2019)
+=============================
+
+- Reliability enhancement in handling cases when sky computation is
+  turned off. [#40]
 
 - Modified the formula for computing ``RMSE`` of the fit in *image pixels*
   to take into account weights when available. [#39]
