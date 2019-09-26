@@ -273,8 +273,13 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
         if batch_update:
             wcs_update_info = []
 
-        for crclean_image, (imfile, exts) in zip(resample.output_crclean,
-                                                resample.input_image_names):
+        if resample.output_crclean is None:
+            output_crclean = len(resample.input_image_names) * [None]
+        else:
+            output_crclean = resample.output_crclean
+
+        for crclean_image, (imfile, exts) in zip(output_crclean,
+                                                 resample.input_image_names):
 
             msg = "*  Aligning image \"{:s}{}\"  *".format(imfile, exts)
             print("\n{0:s}\n{1:s}\n{0:s}\n".format(len(msg) * '*', msg))
@@ -307,7 +312,7 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
 
             fit, img_info = _align_1image(
                 qresample,
-                crclean_image,
+                imfile if crclean_image is None else crclean_image,
                 image_ext=exts,
                 primary_cutouts=prim_cutouts,
                 image_sky=image_sky,
@@ -346,9 +351,10 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
                         print("\nUpdating with new WCS:\n{}".format(new_wcs))
                         update_image_wcs(h, e, new_wcs, wcsname=wcsname)
 
-                with fits.open(crclean_image, mode='update') as h:
-                    for e, _, new_wcs in img_info['wcs_info']:
-                        update_image_wcs(h, e, new_wcs, wcsname=wcsname)
+                if crclean_image is not None:
+                    with fits.open(crclean_image, mode='update') as h:
+                        for e, _, new_wcs in img_info['wcs_info']:
+                            update_image_wcs(h, e, new_wcs, wcsname=wcsname)
 
         # update WCS in image headers:
         if batch_update:
@@ -359,9 +365,10 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
                         print("\nUpdating with new WCS:\n{}".format(new_wcs))
                         update_image_wcs(h, e, new_wcs, wcsname=wcsname)
 
-                with fits.open(crclean_image, mode='update') as h:
-                    for e, new_wcs in wcs_info:
-                        update_image_wcs(h, e, new_wcs, wcsname=wcsname)
+                if crclean_image is not None:
+                    with fits.open(crclean_image, mode='update') as h:
+                        for e, new_wcs in wcs_info:
+                            update_image_wcs(h, e, new_wcs, wcsname=wcsname)
 
         summary.append((iterno, fit_summary))
 

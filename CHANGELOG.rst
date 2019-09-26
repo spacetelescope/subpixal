@@ -12,6 +12,8 @@ Release Notes
 0.0.6.dev (26-September-2019)
 =============================
 
+- Allow alignment code to run with without cosmic ray-cleaned images. [#41]
+
 - Reliability enhancement in handling cases when sky computation is
   turned off. [#40]
 
