@@ -1,6 +1,6 @@
 name: subpixal
 channels:
-    - defaults
+    - http://ssb.stsci.edu/astroconda
 dependencies:
     - "python>=3.5"
     - setuptools
