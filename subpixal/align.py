@@ -62,7 +62,7 @@ def _create_tmp_reference_file(image_file):
 
 def align_images(catalog, resample, wcslin=None, fitgeom='general',
                  nclip=3, sigma=3.0, nmax=10, eps_shift=3e-3, use_weights=True,
-                 wcsname='SUBPIXAL', wcsupdate='batch',
+                 cc_type='NCC', wcsname='SUBPIXAL', wcsupdate='batch',
                  iterative=False, history='last'):
     """
     Perform *relative* image alignment using sub-pixel cross-correlation.
@@ -121,6 +121,15 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
     use_weights : bool, optional
         Indicates whether to perform a weighted fit when catalog contains
         a ``'weights'`` column.
+
+    cc_type : {'CC', 'NCC', 'ZNCC'}, optional
+        Cross-correlation algorithm to be used. ``'CC'`` indicates the
+        "standard" cross-correlation algorithm. ``'NCC'`` refers to the
+        normalized cross-correlation and ``'ZNCC'`` refers to the
+        zero-normalized cross-correlation, see, e.g.,
+        `Terminology in image processing \
+        <https://en.wikipedia.org/wiki/Cross-correlation#\
+        Terminology_in_image_processing>`_.
 
     wcsname : str, None, optional
         Label to give newly updated WCS. The default value will set the
@@ -320,7 +329,8 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
                 nclip=nclip,
                 sigma=sigma,
                 fitgeom=fitgeom,
-                use_weights=use_weights
+                use_weights=use_weights,
+                cc_type=cc_type
             )
 
             fit_summary.append(
@@ -432,7 +442,8 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
 
 def _align_1image(resample, image, image_ext, primary_cutouts, seg,
                  image_sky=None, wcslin=None,
-                 fitgeom='general', nclip=3, sigma=3.0, use_weights=True):
+                 fitgeom='general', nclip=3, sigma=3.0, use_weights=True,
+                 cc_type='NCC'):
     img_info = {
         'file_name': image,
         'wcs_info': [],  # a list of: [extension, original WCS, corrected WCS]
@@ -488,7 +499,8 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
         fitgeom=fitgeom,
         nclip=nclip,
         sigma=sigma,
-        use_weights=use_weights
+        use_weights=use_weights,
+        cc_type=cc_type
     )
 
     img_info['blotted_cutouts'].extend(nonshifted_blts)
@@ -539,7 +551,7 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
 
 
 def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
-                    nclip=3, sigma=3.0, use_weights=True):
+                    nclip=3, sigma=3.0, use_weights=True, cc_type='NCC'):
     """
     Perform linear fit to diplacements (found using cross-correlation) between
     ``img_cutouts`` and "blot" of ``drz_cutouts`` onto ``img_cutouts``.
@@ -575,6 +587,15 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
     use_weights : bool, optional
         Indicates whether to perform a weighted fit when all input
         ``drz_cutouts.src_weight`` are not `None`.
+
+    cc_type : {'CC', 'NCC', 'ZNCC'}, optional
+        Cross-correlation algorithm to be used. ``'CC'`` indicates the
+        "standard" cross-correlation algorithm. ``'NCC'`` refers to the
+        normalized cross-correlation and ``'ZNCC'`` refers to the
+        zero-normalized cross-correlation, see, e.g.,
+        `Terminology in image processing \
+        <https://en.wikipedia.org/wiki/Cross-correlation#\
+        Terminology_in_image_processing>`_.
 
     Returns
     -------
@@ -652,7 +673,7 @@ def find_linear_fit(img_cutouts, drz_cutouts, wcslin=None, fitgeom='general',
         # find cross-correlation shift in image's coordinate system:
         dx, dy, icc, _ = cc.find_displacement(
             imct.data, blt00.data, blt10.data, blt01.data, blt11.data,
-            full_output=True
+            cc_type=cc_type, full_output=True
         )
 
         interlaced_cc.append(icc)
