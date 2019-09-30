@@ -9,7 +9,7 @@ Release Notes
    =====================
 
 
-0.0.6 (30-September-2019)
+0.1.0 (30-September-2019)
 =========================
 
 - Added ``combine_seg_mask`` argument to ``align.align_images()`` and
