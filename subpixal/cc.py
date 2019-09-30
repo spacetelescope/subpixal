@@ -106,7 +106,9 @@ def _build_icc_image(ref, im00, im10, im01, im11, cc_type='NCC'):
 
     cc_type = cc_type.upper()
     if cc_type in ['ZNCC', 'NCC']:
-        _normalize(ref, [im00, im10, im01, im11], cc_type == 'ZNCC')
+        ref, [im00, im10, im01, im11] = _normalize(
+            ref, [im00, im10, im01, im11], cc_type == 'ZNCC'
+        )
 
     # cross-correlate images of different shifts
     cc00 = signal.fftconvolve(ref, im00[::-1, ::-1], mode='same')
@@ -139,11 +141,16 @@ def _normalize(ref, images, zero=False):
     mean = np.mean(data) if zero else 0.0
     std = np.std(data)
 
-    for im, m in zip(images, masks):
-        im[m] -= mean
+    norm_images = [im.copy() for im in images]
+    for im, m in zip(norm_images, masks):
+        if zero:
+            im[m] -= mean
         im[m] /= std
 
     mask = np.sum(masks, axis=0, dtype=np.bool)
+    ref = ref.copy()
     if zero:
         ref -= np.mean(ref[mask])
     ref /= np.std(ref[mask])
+
+    return ref, norm_images

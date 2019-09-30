@@ -9,8 +9,14 @@ Release Notes
    =====================
 
 
-0.0.6.dev (26-September-2019)
-=============================
+0.0.6 (30-September-2019)
+=========================
+
+- Added ``combine_seg_mask`` argument to ``align.align_images()`` and
+  other functions that allows users to turn off combining segmentation mask
+  with other DQ masks for the cutouts. Practical application of this
+  option is to turn off zeroing of pixels that are outside of the
+  segmentation mask in the blotted cutouts. [#43]
 
 - Added support for zero-normalized cross-correlation (ZNCC) and normalized
   cross-correlation (NCC) algorithms. [#42]

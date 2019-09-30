@@ -308,7 +308,8 @@ def create_input_image_cutouts(primary_cutouts, imdata, imwcs, imdq=None,
 
 def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
                            imdq=None, dqbitmask=0, imweight=None,
-                           data_units='counts', exptime=1, pad=1):
+                           data_units='counts', exptime=1, pad=1,
+                           combine_seg_mask=True):
     """
     A function for creating cutouts in one image from cutouts from another
     image. Specifically, this function maps input cutouts to quadrilaterals
@@ -365,6 +366,12 @@ def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
         Number of pixels to pad around the minimal rectangle enclosing
         a mapped cutout (a cutout to be extracted).
 
+    combine_seg_mask: bool, optional
+        Indicates whether to combine segmanetation mask with cutout's
+        mask. When `True`, segmentation image is used to create a mask that
+        indicates "good" pixels in the image. This mask is combined with
+        cutout's mask.
+
     Returns
     -------
     imcutouts : list of Cutout
@@ -406,9 +413,10 @@ def drz_from_input_cutouts(input_cutouts, segmentation_image, imdata, imwcs,
             continue
 
         # update cutout mask with segmentation image:
-        seg = np.zeros_like(imct.data)
-        seg[imct.insertion_slice] = segmentation_image[imct.extraction_slice]
-        imct.mask |= ~(seg == ct.src_id)
+        if combine_seg_mask:
+            seg = np.zeros_like(imct.data)
+            seg[imct.insertion_slice] = segmentation_image[imct.extraction_slice]
+            imct.mask |= ~(seg == ct.src_id)
 
         if imdq is not None:
             imct.mask |= bitfield_to_boolean_mask(
@@ -436,7 +444,7 @@ def create_cutouts(primary_cutouts, segmentation_image,
                    drz_data_units='rate', drz_exptime=1,
                    flt_dq=None, flt_dqbitmask=0, flt_weight=None,
                    flt_data_units='counts', flt_exptime=1,
-                   pad=2):
+                   pad=2, combine_seg_mask=True):
     """
     A function for mapping "primary cutouts" (cutouts formed form a
     drizzle-combined image) to "input images" (generally speaking, distorted
@@ -522,6 +530,12 @@ def create_cutouts(primary_cutouts, segmentation_image,
         Number of pixels to pad around the minimal rectangle enclosing
         a mapped cutout (a cutout to be extracted).
 
+    combine_seg_mask: bool, optional
+        Indicates whether to combine segmanetation mask with cutout's
+        mask. When `True`, segmentation image is used to create a mask that
+        indicates "good" pixels in the image. This mask is combined with
+        cutout's mask.
+
     Returns
     -------
     flt_cutouts : list of Cutout
@@ -566,7 +580,8 @@ def create_cutouts(primary_cutouts, segmentation_image,
         imweight=drz_weight,
         data_units=drz_data_units,
         exptime=drz_exptime,
-        pad=pad * pix_scale_ratio
+        pad=pad * pix_scale_ratio,
+        combine_seg_mask=combine_seg_mask
     )
 
     return flt_cutouts, drz_cutouts

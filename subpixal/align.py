@@ -63,7 +63,7 @@ def _create_tmp_reference_file(image_file):
 def align_images(catalog, resample, wcslin=None, fitgeom='general',
                  nclip=3, sigma=3.0, nmax=10, eps_shift=3e-3, use_weights=True,
                  cc_type='NCC', wcsname='SUBPIXAL', wcsupdate='batch',
-                 iterative=False, history='last'):
+                 combine_seg_mask=True, iterative=False, history='last'):
     """
     Perform *relative* image alignment using sub-pixel cross-correlation.
     Image alignment is performed by adusting each image's WCS so that images
@@ -143,6 +143,12 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
         next image (within the same iteration) will be aligned to a drizzled
         image obtained using (at least some) already aligned
         (in this iteration) images.
+
+    combine_seg_mask: bool, optional
+        Indicates whether to combine segmanetation mask with cutout's
+        mask. When `True`, segmentation image is used to create a mask that
+        indicates "good" pixels in the image. This mask is combined with
+        cutout's mask.
 
     iterative : bool, optional
         If `True`, after each iteration user will be asked whether to
@@ -330,7 +336,8 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
                 sigma=sigma,
                 fitgeom=fitgeom,
                 use_weights=use_weights,
-                cc_type=cc_type
+                cc_type=cc_type,
+                combine_seg_mask=combine_seg_mask
             )
 
             fit_summary.append(
@@ -443,7 +450,7 @@ def align_images(catalog, resample, wcslin=None, fitgeom='general',
 def _align_1image(resample, image, image_ext, primary_cutouts, seg,
                  image_sky=None, wcslin=None,
                  fitgeom='general', nclip=3, sigma=3.0, use_weights=True,
-                 cc_type='NCC'):
+                 cc_type='NCC', combine_seg_mask=True):
     img_info = {
         'file_name': image,
         'wcs_info': [],  # a list of: [extension, original WCS, corrected WCS]
@@ -483,7 +490,8 @@ def _align_1image(resample, image, image_ext, primary_cutouts, seg,
                 drz_sci, drz_wcs,
                 img_sci, img_wcs,
                 drz_data_units=drz_units, drz_exptime=drz_exptime,
-                flt_data_units=img_units, flt_exptime=img_exptime
+                flt_data_units=img_units, flt_exptime=img_exptime,
+                combine_seg_mask=combine_seg_mask
             )
 
             img_info['wcs_info'].append([ext, orig_img_wcs, img_wcs])
