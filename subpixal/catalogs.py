@@ -581,8 +581,7 @@ class SExImageCatalog(ImageCatalog):
             if os.path.isfile(f):
                 os.remove(f)
 
-        cmd = [self._sextractor_cmd, self._file_name, '-c', self._sexconfig,
-               '-EXT_NUMBER', str(self._image_ext)]
+        cmd = [self._sextractor_cmd, self._file_name, '-c', self._sexconfig]
         # popen = subprocess.Popen(cmd, stdout=subprocess.PIPE,
         #                          stderr=subprocess.PIPE)
         # out, err = popen.communicate()

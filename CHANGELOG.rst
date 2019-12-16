@@ -9,6 +9,12 @@ Release Notes
    =====================
 
 
+0.1.1.dev (15-December-2019)
+============================
+
+- Fixed incorrect parameter being passed to SExtractor. [#47]
+
+
 0.1.0 (30-September-2019)
 =========================
 
